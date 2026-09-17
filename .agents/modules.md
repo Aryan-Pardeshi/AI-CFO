@@ -339,7 +339,7 @@ limits, toolChoice behavior: [agent-guide.md](./agent-guide.md#bedrock--nova-2-l
 | `date_of_birth` | resulting age 18-80 |
 | Goal `target_age` | current age + 1 ≤ x ≤ 91 (matches FIRE's modeled lifespan) |
 | Loan `tenure_months` | 1-480 |
-| Loan `annual_rate` | 0-36% (flag anything above as unusually high, still accept it) |
+| Loan `annual_rate` (decimal fraction, 0.085 = 8.5%) | 0-0.36 (flag anything above 0.24 as unusually high, still accept it) |
 
 ### Saving progress
 

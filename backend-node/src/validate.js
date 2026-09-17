@@ -384,7 +384,7 @@ function validateHolding(body, opts = {}) {
   checkNumber(body.fd_annual_rate, "fd_annual_rate", errors, details, {
     nullable: true,
     min: 0,
-    max: 36,
+    max: 0.36,
   });
   checkDate(body.fd_start_date, "fd_start_date", errors, details, { nullable: true });
   checkDate(body.fd_maturity_date, "fd_maturity_date", errors, details, { nullable: true });
@@ -486,7 +486,7 @@ function validateLoan(body, opts = {}) {
   checkEnum(body.loan_type, "loan_type", errors, details, LOAN_TYPES);
   checkPaise(body.principal_paise, "principal_paise", errors, details);
   checkPaise(body.outstanding_paise, "outstanding_paise", errors, details);
-  checkNumber(body.annual_rate, "annual_rate", errors, details, { min: 0, max: 36 });
+  checkNumber(body.annual_rate, "annual_rate", errors, details, { min: 0, max: 0.36 });
   checkSafeInt(body.tenure_months, "tenure_months", errors, details, { min: 1, max: 480 });
   checkDate(body.start_date, "start_date", errors, details);
   checkEnum(body.rate_type, "rate_type", errors, details, RATE_TYPES);

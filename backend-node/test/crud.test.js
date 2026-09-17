@@ -375,7 +375,7 @@ describe("/holdings", () => {
     assert.equal(longSym.statusCode, 400);
     assert.ok(JSON.parse(longSym.body).error.details.symbol);
 
-    for (const rate of [-1, 37]) {
+    for (const rate of [-0.01, 0.37, 8.5]) {
       const res = await handler(
         evt("POST", "/holdings", {
           body: {
@@ -488,7 +488,7 @@ describe("/loans tenure", () => {
       loan_type: "HOME",
       principal_paise: 100,
       outstanding_paise: 90,
-      annual_rate: 8,
+      annual_rate: 0.08,
       tenure_months: tenure,
       start_date: "2024-01-01",
       rate_type: "FIXED",
@@ -526,7 +526,7 @@ describe("/loans tenure", () => {
       name: "L",
       loan_type: "HOME",
       outstanding_paise: 90,
-      annual_rate: 8,
+      annual_rate: 0.08,
       tenure_months: 12,
     };
     for (const pct of [-1, 101]) {
@@ -550,5 +550,26 @@ describe("/loans tenure", () => {
       {}
     );
     assert.equal(ok.statusCode, 201);
+  });
+});
+
+describe("rates are decimal fractions", () => {
+  it("loan annual_rate: 0.085 accepted, 8.5 (percent) rejected, 0.36 boundary accepted", async () => {
+    ddbMock.reset();
+    ddbMock.on(PutCommand).resolves({});
+    const body = (annual_rate) => ({
+      name: "Home loan",
+      loan_type: "HOME",
+      outstanding_paise: 420000000,
+      annual_rate,
+      tenure_months: 240,
+    });
+    const ok = await handler(evt("POST", "/loans", { body: body(0.085) }), {});
+    assert.equal(ok.statusCode, 201);
+    const edge = await handler(evt("POST", "/loans", { body: body(0.36) }), {});
+    assert.equal(edge.statusCode, 201);
+    const pct = await handler(evt("POST", "/loans", { body: body(8.5) }), {});
+    assert.equal(pct.statusCode, 400);
+    assert.ok(JSON.parse(pct.body).error.details.annual_rate);
   });
 });
