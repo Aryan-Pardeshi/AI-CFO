@@ -397,7 +397,7 @@ paths:
       summary: Historical candles
       parameters:
         - {$ref: '#/components/parameters/InstrumentKey'}
-        - {name: period, in: query, schema: {type: string, enum: [1y, 3y, 5y]}}
+        - {name: period, in: query, schema: {type: string, enum: [1d, 3d, 1m, 1y, 3y, 5y]}}
       responses: {'200': {description: OK}}
   /securities/fit:
     get:
