@@ -16,7 +16,7 @@ only ever explains real tool results — it never improvises financial math.
 
 ## Stack
 
-Next.js (Amplify Hosting) · API Gateway HTTP API · Cognito · Lambda (Node CRUD + Python
+Vite + React (Amplify Hosting) · API Gateway HTTP API · Cognito · Lambda (Node CRUD + Python
 finance/agent) · DynamoDB · S3 · Bedrock (Nova 2 Lite) · Strands Agents SDK · AppSync Events ·
 Upstox market data · Firecrawl web search.
 

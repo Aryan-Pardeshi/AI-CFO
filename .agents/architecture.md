@@ -11,7 +11,7 @@
 | Compute | AWS Lambda, arm64, Python 3.13 (finance/agent), Node 22.x (CRUD) |
 | Database | DynamoDB, On-Demand, multi-table (not single-table design) |
 | Files | S3, private, SSE-S3 |
-| Frontend | Next.js / React, AWS Amplify Hosting |
+| Frontend | Vite + React + React Router (SPA), AWS Amplify Hosting. Auth via `aws-amplify` (Cognito email/password + Google through Cognito). Changed from Next.js on 17 Sept: the frontend owner's onboarding was already built on Vite. |
 | Public API | API Gateway **HTTP API** (not REST) |
 | Auth | Amazon Cognito, real signup/login, JWT authorizer on the HTTP API |
 | Realtime | AWS AppSync Events (Cognito auth for subscribe, IAM for publish) — for chat + statement job progress |
@@ -74,9 +74,13 @@ HttpApi  (default authorizer = Cognito JWT)
   ├── CrudFunction        node22.x, 512MB, 10s   — /me, /holdings*, /goals*, /loans*
   ├── FinanceFunction     python3.13, 1024MB, 15s — /portfolio/*, /securities/*, /fire/*,
   │                                                  /net-worth*, /loans/emi, /statements/*,
-  │                                                  /cashflow/*, calculators
-  └── AgentFunction       python3.13, Strands layer, 1024MB, 300s (async) — POST /chat,
-                                                       GET /chat/{job_id}, GET /conversations*
+  │                                                  /cashflow/*, calculators, POST /chat
+  │                                                  (dispatch only: save job, async-invoke
+  │                                                  AgentFunction, return 202)
+  └── AgentFunction       python3.13, Strands layer, 1024MB, 300s (async) — invoked async
+                                                       by FinanceFunction for chat jobs;
+                                                       HTTP: GET /chat/{job_id},
+                                                       GET /conversations*
 EventsApi (AppSync)  — namespace "jobs", channel /jobs/{sub}/{job_id}
   onSubscribe: reject unless segments[1] == identity.sub
 DynamoDB (PAY_PER_REQUEST): users, holdings, goals, loans, fire-scenarios, transactions,
@@ -273,16 +277,17 @@ resources if Strands' streaming path is used internally (even though we stream t
 ├── docs/
 │   ├── submission.md                     (demo script + writeup)
 │   └── help/                               (app-support docs, get_app_help tool)
-├── frontend/
-│   ├── app/
-│   │   ├── onboarding/                     (feat/statements-onboarding)
-│   │   └── (dashboard)/
-│   │       ├── overview/ investments/ securities/ fire/ net-worth/ chat/   (feat/dashboard-ui)
-│   │       ├── goals/ loans/ settings/                                     (feat/node-crud)
-│   │       ├── statements/ cashflow/                                       (feat/statements-onboarding)
-│   │       └── calculators/                                                (feat/calculators-seed)
-│   ├── components/ui/                      (feat/dashboard-ui — design system, shared base)
-│   └── lib/api/                             (typed client generated from openapi.yaml)
+├── frontend/                                (Vite + React + React Router SPA)
+│   └── src/
+│       ├── pages/onboarding/               (feat/statements-onboarding)
+│       ├── pages/<area>/                   overview investments securities fire net-worth chat
+│       │                                     (feat/dashboard-ui) · goals loans settings
+│       │                                     (feat/node-crud) · statements cashflow
+│       │                                     (feat/statements-onboarding) · calculators
+│       │                                     (feat/calculators-seed)
+│       ├── components/ui/                  (feat/dashboard-ui — design system, shared base)
+│       ├── lib/api.js                      (API client for openapi.yaml routes, adds Cognito token)
+│       └── mocks/                          (dev-only MSW handlers, VITE_USE_MOCKS=true)
 ├── backend-node/                            (feat/node-crud — CrudFunction)
 ├── backend-python/
 │   ├── handlers/                            (Lambda entrypoints, one per function)

@@ -1,0 +1,14 @@
+{
+  "name": "aicfo-crud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal AI CFO CrudFunction (Node 22.x, arm64) — /me /holdings* /goals* /loans*",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

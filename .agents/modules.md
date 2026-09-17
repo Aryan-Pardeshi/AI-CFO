@@ -113,7 +113,7 @@ backend-python/finance/creditcard.py
 backend-python/finance/shortterm.py     (needs feat/agent-integrations' Upstox history —
                                           coordinate, or build against a mock history array
                                           first and swap later)
-frontend/app/(dashboard)/calculators/   (EMI, tax, insurance, card, short-term pages)
+frontend/src/pages/calculators/        (EMI, tax, insurance, card, short-term pages)
 seed/                                   (demo portfolio, fundamentals seed, glossary, test
                                           statement files — coordinate content with
                                           feat/statements-onboarding for the test fixtures)
@@ -197,7 +197,7 @@ _Formerly .agents/modules/dashboard-ui.md._
 
 ## Owned paths
 ```text
-frontend/app/(dashboard)/            (Overview, Investments, Security detail, FIRE, Net worth, Chat)
+frontend/src/pages/<area>/             (Overview, Investments, Security detail, FIRE, Net worth, Chat)
 frontend/components/ui/              (design system — this is the shared base other UI
                                        modules build on top of; land it first, hour 0-3)
 frontend/lib/api/                    (typed API client generated from contracts/openapi.yaml)
@@ -240,9 +240,9 @@ _Formerly .agents/modules/node-crud.md._
 ## Owned paths
 ```text
 backend-node/                        (CrudFunction: /me, /holdings*, /goals*, /loans*)
-frontend/app/(dashboard)/goals/      (forms UI)
-frontend/app/(dashboard)/loans/      (forms UI)
-frontend/app/(dashboard)/settings/   (assumptions editor — inflation, returns, risk-free rate)
+frontend/src/pages/goals/           (forms UI)
+frontend/src/pages/loans/           (forms UI)
+frontend/src/pages/settings/        (assumptions editor — inflation, returns, risk-free rate)
 ```
 
 ## Do not edit outside owned paths
@@ -276,9 +276,9 @@ _Formerly .agents/modules/statements-onboarding.md._
 ## Owned paths
 ```text
 backend-python/statements/           (extract, validate, categorize, commit)
-frontend/app/onboarding/             (8-step flow — see below)
-frontend/app/(dashboard)/statements/ (upload + review UI)
-frontend/app/(dashboard)/cashflow/   (cash flow summary page)
+frontend/src/pages/onboarding/      (8-step flow — see below)
+frontend/src/pages/statements/      (upload + review UI)
+frontend/src/pages/cashflow/        (cash flow summary page)
 ```
 
 ## Do not edit outside owned paths

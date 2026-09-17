@@ -87,7 +87,7 @@ Full tool contracts, boundaries and the system prompt outline: [agent-guide.md](
   [agent-guide.md](agent-guide.md#stretch-guardrails)). No EventBridge daily refresh in MVP.
 - API Gateway **HTTP API** (not REST), Cognito JWT authorizer, user identity always from the
   verified `sub` claim — never from a client-supplied `user_id`.
-- Next.js frontend, Amplify Hosting.
+- Vite + React SPA frontend, Amplify Hosting.
 - Upstox is the market-data source; mfapi.in for MF NAV; instrument search uses a local index,
   never one API call per keystroke.
 - Fundamentals/market data must be verified or seeded with `source` + `as_of` — never

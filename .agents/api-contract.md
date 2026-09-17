@@ -53,7 +53,12 @@ category_source:   rule | ai | user
 fd_type:           CUMULATIVE | PAYOUT
 ```
 
-## DynamoDB tables (prefix `aicfo-`, all On-Demand)
+## DynamoDB tables (all On-Demand)
+
+Physical table names are `${StackName}-<table>` (e.g. `aicfo-dev-users`). Code never hardcodes
+them — read from env vars set in `infra/template.yaml` (`USERS_TABLE`, `HOLDINGS_TABLE`, …).
+Composite key attribute names: `transactions` SK = `txn_sk`, `insights` SK = `insight_sk`,
+`conversations` PK = `user_conv`, SK = `msg_sk`.
 
 | Table | PK / SK | Writer | Notes |
 |---|---|---|---|
