@@ -216,3 +216,32 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- Node / Next.js ----
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# ---- AWS / SAM ----
+.aws-sam/
+samconfig.toml.local
+.amplify/
+amplify_outputs.json
+
+# ---- Env / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Private / local-only context (Aryan only, never pushed) ----
+.claude/
+
+# ---- Superpowers skill scratch output ----
+docs/superpowers/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
