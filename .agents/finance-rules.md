@@ -114,8 +114,8 @@ the same inputs: **age 35**.
 ### Result shape
 ```json
 {
-  "fire_age": 31, "required_corpus_at_fire_paise": 5671000000,
-  "projected_corpus_at_fire_paise": 5671000000, "implied_withdrawal_rate_pct": 4.8,
+  "fire_age": 31, "required_corpus_at_fire_paise": 567100000,
+  "projected_corpus_at_fire_paise": 567100000, "implied_withdrawal_rate_pct": 4.8,
   "conservative_fire_age": 35, "progress_pct_today": 0.5,
   "assumptions": {"inflation": 0.06, "step_up": 0.06, "return_before_40": 0.12,
     "return_40_to_60": 0.10, "return_after_60": 0.08, "post_fire_return": null,

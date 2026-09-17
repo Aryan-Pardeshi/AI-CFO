@@ -1,4 +1,6 @@
 # Runtime dependencies bundled into the Lambda zip by sam build.
 # Anything with compiled wheels (e.g. pydantic-core) must be built for Linux arm64:
 # use `sam build --use-container`, not a plain Windows build.
+numpy>=1.26  # finance ratio math (returns, volatility, covariance) — floats only, never money
+pandas>=2.0  # finance time-series helpers (pct_change-style series, date alignment)
 openai>=1.0  # strands.models.openai.OpenAIModel client — Kilo Gateway. See agent-guide.md#kilo-ai-gateway.

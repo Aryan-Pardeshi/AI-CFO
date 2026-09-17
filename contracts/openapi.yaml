@@ -227,6 +227,85 @@ components:
         projected_curve: {type: array, items: {type: object}}
         warnings: {type: array, items: {type: string}}
 
+    FireCalculateRequest:
+      type: object
+      description: >
+        All fields optional. Omitted profile fields fall back to the stored
+        users row; omitted assumptions fall back to defaults (inflation 0.06,
+        step_up 0.06, returns 0.12/0.10/0.08, lifespan 91). A client-sent
+        user_id is ignored — identity always comes from the JWT sub.
+      properties:
+        current_age: {type: integer, description: "overrides age from date_of_birth"}
+        monthly_expenses_paise: {type: integer}
+        monthly_investment_paise: {type: integer}
+        current_corpus_paise: {type: integer, description: "overrides holdings-derived corpus (excl. cash, incl. FD)"}
+        inflation: {type: number, default: 0.06}
+        step_up: {type: number, default: 0.06}
+        return_before_40: {type: number, default: 0.12}
+        return_40_to_60: {type: number, default: 0.10}
+        return_after_60: {type: number, default: 0.08}
+        post_fire_return: {type: number, nullable: true}
+        lifespan_age: {type: integer, default: 91}
+      example:
+        monthly_expenses_paise: 5000000
+        monthly_investment_paise: 5000000
+
+    GoalImpactRequest:
+      type: object
+      required: [candidate_goal]
+      properties:
+        candidate_goal:
+          type: object
+          required: [amount_today_paise, target_age]
+          properties:
+            goal_type: {$ref: '#/components/schemas/GoalType'}
+            amount_today_paise: {type: integer}
+            target_age: {type: integer}
+            inflation_rate: {type: number, nullable: true}
+        current_age: {type: integer}
+        monthly_expenses_paise: {type: integer}
+        monthly_investment_paise: {type: integer}
+        current_corpus_paise: {type: integer}
+        inflation: {type: number}
+        step_up: {type: number}
+        return_before_40: {type: number}
+        return_40_to_60: {type: number}
+        return_after_60: {type: number}
+        post_fire_return: {type: number, nullable: true}
+        lifespan_age: {type: integer}
+      example:
+        candidate_goal: {goal_type: CAR, amount_today_paise: 50000000, target_age: 35}
+
+    GoalImpactResult:
+      type: object
+      properties:
+        baseline_fire_age: {type: integer, nullable: true}
+        with_goal_fire_age: {type: integer, nullable: true}
+        delta_years: {type: integer, nullable: true, description: "never negative for a positive-amount goal"}
+        baseline_required_corpus_paise: {type: integer, nullable: true}
+        with_goal_required_corpus_paise: {type: integer, nullable: true}
+
+    NetWorth:
+      type: object
+      properties:
+        as_of: {type: string, format: date-time}
+        total_assets_paise: {type: integer}
+        total_liabilities_paise: {type: integer}
+        net_worth_paise: {type: integer}
+        source: {type: string, enum: [holdings, declared], description: "holdings wins once any holdings exist"}
+        cash_balance_paise: {type: integer}
+        emergency_fund_coverage_months: {type: number, nullable: true}
+        warnings: {type: array, items: {type: string}}
+
+    NetWorthProjection:
+      type: object
+      properties:
+        as_of: {type: string, format: date-time}
+        fire_age: {type: integer, nullable: true}
+        assumptions: {type: object, description: "same age-stage assumptions as FireResult"}
+        curve: {type: array, items: {type: object, properties: {age: {type: integer}, corpus_paise: {type: integer}}}}
+        warnings: {type: array, items: {type: string}}
+
   parameters:
     InstrumentKey:
       name: instrument_key
@@ -338,19 +417,41 @@ paths:
   /fire/calculate:
     post:
       summary: Compute FIRE age (see .agents/finance-rules.md for the locked fixture)
-      responses: {'200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/FireResult'}}}}}
+      requestBody:
+        required: false
+        content: {application/json: {schema: {$ref: '#/components/schemas/FireCalculateRequest'}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/FireResult'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '404': {description: No user profile, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /fire/goal-impact:
     post:
       summary: Compare baseline FIRE vs FIRE with one added goal
-      responses: {'200': {description: OK}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/GoalImpactRequest'}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/GoalImpactResult'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '404': {description: No user profile, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /fire/scenarios:
     get: {summary: List saved scenarios, responses: {'200': {description: OK}}}
     post: {summary: Save a scenario, responses: {'201': {description: Created}}}
 
   /net-worth:
-    get: {summary: Current net worth, responses: {'200': {description: OK}}}
+    get:
+      summary: Current net worth
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/NetWorth'}}}}
+        '404': {description: No user profile, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /net-worth/projection:
-    get: {summary: Net worth projection (shares FIRE assumptions), responses: {'200': {description: OK}}}
+    get:
+      summary: Net worth projection (shares FIRE assumptions)
+      parameters: [{name: years, in: query, schema: {type: integer, default: 30, minimum: 1, maximum: 80}}]
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/NetWorthProjection'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '404': {description: No user profile, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
 
   /loans/emi:
     post: {summary: EMI calculator, responses: {'200': {description: OK}}}

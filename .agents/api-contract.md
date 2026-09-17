@@ -179,6 +179,57 @@ GET  /conversations/{conversation_id}/messages
 **`POST /fire/calculate`** — see [finance-rules.md](finance-rules.md#fire-contract) for the
 full request/response shape and the locked regression fixture.
 
+Request (`FireCalculateRequest`, all fields optional — full schema in
+`contracts/openapi.yaml`): `current_age` (overrides age from
+`date_of_birth`), `monthly_expenses_paise`, `monthly_investment_paise`,
+`current_corpus_paise` (overrides holdings-derived corpus), assumption
+overrides `inflation` / `step_up` / `return_before_40` / `return_40_to_60` /
+`return_after_60` / `post_fire_return` / `lifespan_age`. Omitted profile
+fields fall back to the stored `users` row; omitted assumptions fall back to
+defaults (0.06 / 0.06 / 0.12 / 0.10 / 0.08 / null / 91). Response is
+`FireResult`. Errors: 400 (`current_age` and `date_of_birth` both missing, or
+expenses/investment missing in both profile and body), 404 (no user profile).
+
+**`POST /fire/goal-impact`**
+```json
+// req  {"candidate_goal": {"goal_type": "CAR", "amount_today_paise": 50000000, "target_age": 35},
+//        plus the same optional FireCalculateRequest overrides}
+// res  {"baseline_fire_age": 31, "with_goal_fire_age": 33, "delta_years": 2,
+//        "baseline_required_corpus_paise": 567067826,
+//        "with_goal_required_corpus_paise": 612000000}
+```
+`delta_years` is never negative for a positive-amount goal.
+
+**`GET /net-worth`** (`NetWorth`)
+```json
+{
+  "as_of": "2026-09-18T09:31:00Z",
+  "total_assets_paise": 51000000, "total_liabilities_paise": 0,
+  "net_worth_paise": 51000000, "source": "holdings",
+  "cash_balance_paise": 1000000, "emergency_fund_coverage_months": 3.0,
+  "warnings": []
+}
+```
+`source` is `holdings` once any holdings exist (wins over
+`declared_net_worth_paise`), else `declared`. Emergency coverage =
+`cash / (monthly expenses + active loan EMIs)`; null when there is no monthly
+outflow.
+
+**`GET /net-worth/projection?years=30`** (`NetWorthProjection`)
+```json
+{
+  "as_of": "2026-09-18T09:31:00Z", "fire_age": 31,
+  "assumptions": {"inflation": 0.06, "step_up": 0.06, "return_before_40": 0.12,
+    "return_40_to_60": 0.10, "return_after_60": 0.08, "post_fire_return": null,
+    "lifespan_age": 91},
+  "curve": [{"age": 30, "corpus_paise": 10000000}],
+  "warnings": []
+}
+```
+Same age-stage assumptions as FIRE (single source in `finance/fire.py`);
+pre-`fire_age` years accumulate, later years draw down (expenses + goals +
+EMIs out). `years` 1–80, default 30.
+
 **`POST /chat`**
 ```json
 // req  {"job_id": "uuid", "conversation_id": "optional", "message": "Am I too concentrated?"}
