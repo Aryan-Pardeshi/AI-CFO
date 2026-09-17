@@ -469,7 +469,7 @@ Resources:
           # live chat model path. See agent-guide.md#kilo-ai-gateway.
           BEDROCK_MODEL_ID: global.amazon.nova-2-lite-v1:0
           KILO_BASE_URL: https://api.kilo.ai/api/gateway
-          KILO_MODEL_ID: anthropic/claude-haiku-4.5
+          KILO_MODEL_ID: kilo-auto/free
           EVENTS_HTTP_ENDPOINT: !GetAtt EventsApi.Dns.Http
           USERS_TABLE: !Ref UsersTable
           HOLDINGS_TABLE: !Ref HoldingsTable

@@ -83,9 +83,16 @@ the agent's tool-call budget if avoidable.
 - OpenAI-compatible gateway, single key routes to many providers (Anthropic, OpenAI, Google,
   etc). Base URL `https://api.kilo.ai/api/gateway`, endpoint `/chat/completions`, auth
   `Authorization: Bearer $KILO_API_KEY`. Model ids are `provider/model-name`.
-- **Model in use:** `anthropic/claude-haiku-4.5` ($1/1M tokens on Kilo's board — cheapest
-  Claude tier, still solid at tool-calling). Env var `KILO_MODEL_ID`, overridable without a
-  code change.
+- **Model in use:** `kilo-auto/free` — the only tier confirmed **$0 at our account balance**
+  (verified live: `"cost":0`, HTTP 200). Auto-routes to whichever free model is up (landed on
+  `nvidia/nemotron-3-ultra-550b-a55b:free` in testing, can change call to call). Limited
+  capability vs a paid model, and per Kilo's docs may route to providers that log data for
+  service improvement — acceptable for hackathon/demo data, revisit if real user data is ever
+  in scope. Named "free" models like `tencent-hy3-free` still returned `402 Payment Required`
+  against our $0 balance — the free label is provider-side, not account-side; don't assume a
+  `:free`/`-free` suffix means callable at zero balance, verify with a live call. Env var
+  `KILO_MODEL_ID`, overridable without a code change — swap to a paid model id (e.g.
+  `anthropic/claude-haiku-4.5`, $1/1M) once Kilo credits are added.
 - Key stored in Secrets Manager `aicfo/kilo` as `{"api_key": "..."}` — same pattern as
   `aicfo/upstox`/`aicfo/firecrawl`. **Never in code, env, or git.**
 - Strands wiring (replaces `BedrockModel` — see Model & runtime below):
