@@ -239,6 +239,7 @@ Resources:
         Variables:
           DATA_BUCKET: !Ref DataBucket
           AGENT_FUNCTION_NAME: !Ref AgentFunction
+          EVENTS_HTTP_ENDPOINT: !GetAtt EventsApi.Dns.Http
           USERS_TABLE: !Ref UsersTable
           HOLDINGS_TABLE: !Ref HoldingsTable
           GOALS_TABLE: !Ref GoalsTable
@@ -279,6 +280,19 @@ Resources:
             BucketName: !Ref DataBucket
         - LambdaInvokePolicy:
             FunctionName: !Ref AgentFunction
+        - Statement:
+            - Sid: AllowAppSyncEventPublish
+              Effect: Allow
+              Action:
+                - appsync:EventPublish
+              Resource:
+                - !Sub arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${EventsApi.ApiId}/channelNamespace/jobs
+            - Sid: AllowAppSyncEventConnect
+              Effect: Allow
+              Action:
+                - appsync:EventConnect
+              Resource:
+                - !Sub arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${EventsApi.ApiId}
         - Statement:
             - Sid: AllowUpstoxFirecrawlSecrets
               Effect: Allow
@@ -452,6 +466,7 @@ Resources:
         Variables:
           DATA_BUCKET: !Ref DataBucket
           BEDROCK_MODEL_ID: global.amazon.nova-2-lite-v1:0
+          EVENTS_HTTP_ENDPOINT: !GetAtt EventsApi.Dns.Http
           USERS_TABLE: !Ref UsersTable
           HOLDINGS_TABLE: !Ref HoldingsTable
           GOALS_TABLE: !Ref GoalsTable
@@ -529,6 +544,19 @@ Resources:
               Resource:
                 - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/upstox-*
                 - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/firecrawl-*
+        - Statement:
+            - Sid: AllowAppSyncEventPublish
+              Effect: Allow
+              Action:
+                - appsync:EventPublish
+              Resource:
+                - !Sub arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${EventsApi.ApiId}/channelNamespace/jobs
+            - Sid: AllowAppSyncEventConnect
+              Effect: Allow
+              Action:
+                - appsync:EventConnect
+              Resource:
+                - !Sub arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/${EventsApi.ApiId}
       Events:
         GetChat:
             Type: HttpApi
@@ -549,8 +577,57 @@ Resources:
               Path: /conversations/{conversation_id}/messages
               Method: GET
 
-  # NOTE: AppSync Events API (namespace "jobs", channel /jobs/{sub}/{job_id}) is a
-  # separate small piece — intentionally NOT added in this hour 0-3 scaffold.
+  # ---- Realtime (AppSync Events: chat streaming + statement progress) ----
+  # Single Event API; browsers subscribe with Cognito, Lambdas publish with IAM.
+  EventsApi:
+    Type: AWS::AppSync::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-events
+      EventConfig:
+        AuthProviders:
+          - AuthType: AMAZON_COGNITO_USER_POOLS
+            CognitoConfig:
+              UserPoolId: !Ref UserPool
+              AwsRegion: !Ref AWS::Region
+          - AuthType: AWS_IAM
+        ConnectionAuthModes:
+          - AuthType: AMAZON_COGNITO_USER_POOLS
+          - AuthType: AWS_IAM
+        DefaultPublishAuthModes:
+          - AuthType: AWS_IAM
+        DefaultSubscribeAuthModes:
+          - AuthType: AMAZON_COGNITO_USER_POOLS
+
+  JobsNamespace:
+    Type: AWS::AppSync::ChannelNamespace
+    Properties:
+      ApiId: !GetAtt EventsApi.ApiId
+      Name: jobs
+      SubscribeAuthModes:
+        - AuthType: AMAZON_COGNITO_USER_POOLS
+      PublishAuthModes:
+        - AuthType: AWS_IAM
+      # No onPublish handler: publish is IAM-only (Lambdas), never browsers.
+      # Only /jobs/<own Cognito sub>/<job_id> may be subscribed: no other users, no wildcards.
+      CodeHandlers: |
+        import { util } from '@aws-appsync/utils';
+
+        export function onSubscribe(ctx) {
+          const segments = ctx.info.channel.segments || [];
+          const ownerSub = segments[1];
+          const jobId = segments[2];
+          if (
+            segments.length !== 3 ||
+            segments[0] !== 'jobs' ||
+            !ownerSub ||
+            !jobId ||
+            ownerSub === '*' ||
+            jobId === '*' ||
+            ownerSub !== ctx.identity.sub
+          ) {
+            util.unauthorized();
+          }
+        }
 
   # ---- DynamoDB (PAY_PER_REQUEST, prefix aicfo-) ----
   UsersTable:
@@ -713,6 +790,15 @@ Outputs:
   DataBucketName:
     Description: Private S3 data bucket
     Value: !Ref DataBucket
+  EventsApiId:
+    Description: AppSync Events API ID
+    Value: !GetAtt EventsApi.ApiId
+  EventsHttpEndpoint:
+    Description: AppSync Events HTTP (publish) endpoint
+    Value: !GetAtt EventsApi.Dns.Http
+  EventsRealtimeEndpoint:
+    Description: AppSync Events realtime (subscribe) endpoint
+    Value: !GetAtt EventsApi.Dns.Realtime
   CognitoDomain:
     Condition: HasGoogle
     Description: Cognito hosted domain for Google sign-in
