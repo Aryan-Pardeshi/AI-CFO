@@ -5,8 +5,8 @@ Description: Personal AI CFO (aicfo-dev) — hour 0-3 stub. Cognito + HttpApi (J
 Parameters:
   StrandsLayerVersion:
     Type: Number
-    Default: 1
-    Description: Version number for the official Strands agents Lambda layer (aarch64, py3.13). Fill in latest at deploy time.
+    Default: 2
+    Description: Version number for the official Strands agents Lambda layer (aarch64, py3.13). v2 = strands-agents 1.40.0 (checked 2026-09-17).
   GoogleClientId:
     Type: String
     Default: ""

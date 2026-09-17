@@ -1,3 +1,3 @@
-# Hour 0-3 stub — real deps land with feat/backend-core.
-pydantic>=2.0
-pytest>=8.0
+# Runtime dependencies bundled into the Lambda zip by sam build (none yet).
+# Anything with compiled wheels (e.g. pydantic-core) must be built for Linux arm64:
+# use `sam build --use-container`, not a plain Windows build.

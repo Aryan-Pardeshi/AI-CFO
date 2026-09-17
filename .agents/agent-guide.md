@@ -12,7 +12,7 @@ _Formerly .agents/integrations.md._
 ## Upstox (market data)
 
 - **Analytics Token**: read-only, **1-year validity**, generated once from the Upstox
-  Developer Apps console. Store in Secrets Manager `aicfo/upstox`, never in code/env/git.
+  Developer Apps console. Store in Secrets Manager `aicfo/upstox` as `{"analytics_token": "..."}`, never in code/env/git.
 - **Works with no static IP**: Market Quote, Historical Data, **Fundamentals**, News, Market
   Information, Option Chain, WebSocket. All callable directly from Lambda.
 - **Needs a whitelisted static IP**: User, Payments, **Orders**, GTT Orders, **Portfolio
@@ -58,7 +58,7 @@ the agent's tool-call budget if avoidable.
   `blockAds`, `removeBase64Images`, `maxAge` (cache window, default 2 days), `timeout`. 1
   credit/page.
 - Free plan: 1,000 credits/month (~500 searches, or fewer with scraping mixed in).
-- API key in Secrets Manager `aicfo/firecrawl`.
+- API key in Secrets Manager `aicfo/firecrawl` as `{"api_key": "..."}`.
 - **Caps per chat question: 5 searches + 8 page reads**, inside the overall 30 tool-call cap.
 - **Full injection-defense design lives in [agent-guide.md](agent-guide.md#web-content-safety)
   — read that before wiring this tool, it's not just "call the API".**
