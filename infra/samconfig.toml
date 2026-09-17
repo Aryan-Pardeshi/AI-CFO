@@ -8,4 +8,4 @@ region = "ap-south-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "GoogleClientId=188825954132-njrl1tgpphsvpd25g88nffke3mjauaol.apps.googleusercontent.com"
+parameter_overrides = "GoogleClientId=188825954132-njrl1tgpphsvpd25g88nffke3mjauaol.apps.googleusercontent.com FrontendCallbackUrls=http://localhost:5173/login,http://localhost:5174/login FrontendOrigins=http://localhost:5173,http://localhost:5174"
