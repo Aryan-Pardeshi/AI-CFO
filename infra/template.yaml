@@ -465,7 +465,11 @@ Resources:
       Environment:
         Variables:
           DATA_BUCKET: !Ref DataBucket
+          # Bedrock parked (account on Free plan blocks inference) — Kilo Gateway is the
+          # live chat model path. See agent-guide.md#kilo-ai-gateway.
           BEDROCK_MODEL_ID: global.amazon.nova-2-lite-v1:0
+          KILO_BASE_URL: https://api.kilo.ai/api/gateway
+          KILO_MODEL_ID: anthropic/claude-haiku-4.5
           EVENTS_HTTP_ENDPOINT: !GetAtt EventsApi.Dns.Http
           USERS_TABLE: !Ref UsersTable
           HOLDINGS_TABLE: !Ref HoldingsTable
@@ -544,6 +548,7 @@ Resources:
               Resource:
                 - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/upstox-*
                 - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/firecrawl-*
+                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/kilo-*
         - Statement:
             - Sid: AllowAppSyncEventPublish
               Effect: Allow

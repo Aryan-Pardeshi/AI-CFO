@@ -75,7 +75,38 @@ the agent's tool-call budget if avoidable.
 - Documented as available in `ap-south-1` generally; the Events *feature* specifically wasn't
   directly confirmed in research — **verify in console on day 1**.
 
-## Bedrock / Nova 2 Lite
+## Kilo AI Gateway (chat model, live) {#kilo-ai-gateway}
+
+- **Why:** Bedrock is parked — the AWS account is on the Free plan, which blocks Bedrock
+  inference account-wide (confirmed via `aws freetier get-account-plan-state`). Switching to
+  Paid is a billing decision only Aryan makes; until then this is the chat model path.
+- OpenAI-compatible gateway, single key routes to many providers (Anthropic, OpenAI, Google,
+  etc). Base URL `https://api.kilo.ai/api/gateway`, endpoint `/chat/completions`, auth
+  `Authorization: Bearer $KILO_API_KEY`. Model ids are `provider/model-name`.
+- **Model in use:** `anthropic/claude-haiku-4.5` ($1/1M tokens on Kilo's board — cheapest
+  Claude tier, still solid at tool-calling). Env var `KILO_MODEL_ID`, overridable without a
+  code change.
+- Key stored in Secrets Manager `aicfo/kilo` as `{"api_key": "..."}` — same pattern as
+  `aicfo/upstox`/`aicfo/firecrawl`. **Never in code, env, or git.**
+- Strands wiring (replaces `BedrockModel` — see Model & runtime below):
+  ```python
+  from strands.models.openai import OpenAIModel
+
+  model = OpenAIModel(
+      client_args={"api_key": kilo_api_key, "base_url": os.environ["KILO_BASE_URL"]},
+      model_id=os.environ["KILO_MODEL_ID"],
+  )
+  ```
+  Needs the `openai` package in `backend-python/requirements.txt` (the Strands Lambda layer
+  doesn't bundle it) — pure-Python-ish but pulls `pydantic-core`, so still build with
+  `sam build --use-container`.
+- Tool-use semantics (JSON schema tool calls, forced tool choice) work the same shape as
+  Bedrock Converse via Strands' abstraction — no tool-registry changes needed for the swap.
+- **If Aryan upgrades the account to Paid later**: Bedrock section below still has the working
+  IAM policy and model id — swapping back is a `KILO_*` → `BEDROCK_MODEL_ID` env/model-class
+  change, not a rewrite.
+
+## Bedrock / Nova 2 Lite (parked — Free plan blocks inference, see above)
 
 - Model id: `global.amazon.nova-2-lite-v1:0`. See
   [architecture.md](architecture.md#bedrock-why-global-and-the-iam-policy-it-needs) for the
@@ -169,8 +200,9 @@ never from a model-generated tool argument.
 
 ## Model & runtime
 
-- `BedrockModel(model_id="global.amazon.nova-2-lite-v1:0")`, temperature ≈0.2, reasoning off,
-  max_tokens ≈2000 — tune once live.
+- `OpenAIModel` pointed at Kilo Gateway (`model_id` from `KILO_MODEL_ID`, currently
+  `anthropic/claude-haiku-4.5` — see [Kilo AI Gateway](#kilo-ai-gateway) above), temperature
+  ≈0.2, reasoning off, max_tokens ≈2000 — tune once live.
 - History: last 10 turns from `conversations`. Tool *results* aren't stored in history, only a
   `tools_used` list per assistant message.
 - Hooks: (1) tool-call cap 30 via `BeforeToolCallEvent.cancel_tool`; (2) publish
