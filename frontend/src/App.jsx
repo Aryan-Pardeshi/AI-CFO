@@ -1,11 +1,11 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
+import RequireAuth from './components/RequireAuth';
 import Register from './pages/Register';
+import ConfirmSignUp from './pages/ConfirmSignUp';
 import Login from './pages/Login';
-import OnboardingMethod from './pages/OnboardingMethod';
-import ManualEntry from './pages/ManualEntry';
-import CSVUpload from './pages/CSVUpload';
+import Onboarding from './pages/Onboarding';
 import Dashboard from './pages/Dashboard';
 import { ThemeProvider } from './context/ThemeContext';
 
@@ -15,13 +15,26 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/register" replace />} />
+            <Route index element={<Navigate to="/login" replace />} />
             <Route path="register" element={<Register />} />
+            <Route path="confirm" element={<ConfirmSignUp />} />
             <Route path="login" element={<Login />} />
-            <Route path="onboarding" element={<OnboardingMethod />} />
-            <Route path="onboarding/manual" element={<ManualEntry />} />
-            <Route path="onboarding/csv" element={<CSVUpload />} />
-            <Route path="dashboard" element={<Dashboard />} />
+            <Route
+              path="onboarding"
+              element={
+                <RequireAuth>
+                  <Onboarding />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="dashboard"
+              element={
+                <RequireAuth>
+                  <Dashboard />
+                </RequireAuth>
+              }
+            />
           </Route>
         </Routes>
       </Router>

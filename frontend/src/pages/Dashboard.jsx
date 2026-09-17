@@ -1,62 +1,78 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../components/ui/Button';
+import { getMe } from '../lib/api.js';
+import { signOutUser } from '../lib/auth.js';
+import { formatPaise } from '../lib/money.js';
+
+function fmt(paise) {
+  if (paise === null || paise === undefined) return '—';
+  try {
+    return formatPaise(paise);
+  } catch {
+    return '—';
+  }
+}
 
 const Dashboard = () => {
-  const [userData, setUserData] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const email = localStorage.getItem('userEmail');
-      if (!email) {
-        navigate('/login');
-        return;
-      }
-      
-      try {
-        const res = await fetch(`http://localhost:5000/api/auth/user/${encodeURIComponent(email)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setUserData(data.user);
+    let mounted = true;
+    getMe()
+      .then((p) => {
+        if (!mounted) return;
+        if (!p || p.onboarded === false) {
+          navigate('/onboarding', { replace: true });
+          return;
         }
-      } catch (err) {
-        console.error("Failed to fetch user data", err);
-      }
+        setProfile(p);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        if (err && (err.status === 404 || err.code === 'NOT_FOUND')) {
+          navigate('/onboarding', { replace: true });
+          return;
+        }
+        setError(err?.message || 'Could not load profile');
+      });
+    return () => {
+      mounted = false;
     };
-    fetchUser();
   }, [navigate]);
+
+  async function handleSignOut() {
+    await signOutUser();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <div style={{ width: '100%', maxWidth: '800px' }}>
-      <h1 style={{ marginBottom: '2rem' }}>Dashboard Overview</h1>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-        Here is the raw data stored in DynamoDB for your account.
-      </p>
-
-      {userData ? (
-        <pre style={{ 
-          background: 'var(--surface-color)', 
-          padding: '1.5rem', 
-          border: '1px solid var(--border-color)',
-          overflowX: 'auto',
-          fontSize: '0.9rem',
-          lineHeight: '1.5'
-        }}>
-          {JSON.stringify(userData, null, 2)}
-        </pre>
-      ) : (
-        <p>Loading your data...</p>
-      )}
-
-      <div style={{ marginTop: '2rem' }}>
-        <Button variant="outline" onClick={() => {
-          localStorage.removeItem('userEmail');
-          navigate('/login');
-        }}>
-          Log Out
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+        <h1 style={{ margin: 0 }}>Dashboard</h1>
+        <Button variant="outline" style={{ width: 'auto' }} onClick={handleSignOut}>
+          Sign out
         </Button>
       </div>
+      {error && <div style={{ color: 'var(--error-color)', marginBottom: '1rem' }}>{error}</div>}
+      {!profile ? (
+        <p>Loading your data…</p>
+      ) : (
+        <>
+          <div style={{ background: 'var(--surface-color)', border: '1px solid var(--border-color)', padding: '1.5rem', marginBottom: '1.5rem' }}>
+            <h2 style={{ marginTop: 0 }}>Welcome{profile.name ? `, ${profile.name}` : ''}</h2>
+            <p>Monthly income: {fmt(profile.monthly_income_paise)}</p>
+            <p>Monthly expenses (excl. EMIs): {fmt(profile.monthly_expenses_paise)}</p>
+            <p>Cash balance: {fmt(profile.cash_balance_paise)}</p>
+          </div>
+          <div style={{ background: 'var(--surface-color)', border: '1px solid var(--border-color)', padding: '1.5rem' }}>
+            <h3 style={{ marginTop: 0 }}>Coming soon</h3>
+            <p style={{ color: 'var(--text-secondary)' }}>Investments, loans, goals, FIRE projection, and chat will appear here.</p>
+          </div>
+        </>
+      )}
     </div>
   );
 };
