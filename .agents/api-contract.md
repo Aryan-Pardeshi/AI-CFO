@@ -27,9 +27,10 @@ human-readable explanation of the conventions behind it. If they disagree, fix
   {"error": {"code": "VALIDATION_ERROR", "message": "...", "details": {}}}
   ```
   Codes: `VALIDATION_ERROR` (400), `UNAUTHORIZED` (401), `NOT_FOUND` (404),
-  `UPSTREAM_UNAVAILABLE` (502), `INSUFFICIENT_DATA` (422), `INTERNAL` (500).
+  `UPSTREAM_UNAVAILABLE` (502), `INSUFFICIENT_DATA` (422), `INTERNAL` (500), `NOT_IMPLEMENTED` (501, route not built yet).
 - **Market data responses** always carry `source` and `as_of`.
-- **CORS**: allow the Amplify domain + `http://localhost:3000`.
+- **CORS**: allow the Amplify domain + `http://localhost:5173` (Vite dev), via the
+  `FrontendOrigins` template parameter.
 
 ## Enums
 
@@ -112,6 +113,18 @@ PUT    /goals/{id}        DELETE /goals/{id}
 GET    /loans             POST /loans
 PUT    /loans/{id}        DELETE /loans/{id}
 ```
+
+CRUD behavior (implemented in `backend-node/`):
+- `GET /me` → 404 until the first `PUT /me/profile`. `PUT /me/profile` is a partial update that
+  creates the row if missing. `PUT` on holdings/goals/loans is partial too.
+- Lists return a bare JSON array. `POST` → 201 with the created item (server-generated id),
+  `DELETE` → 204. Unknown or other users' ids → 404.
+- Client-sent `user_id` / `holding_id` / `goal_id` / `loan_id` are ignored; unknown fields → 400.
+- Required on `POST`: holdings `asset_type`, `name` (+ `fd_principal_paise` for FD, `quantity`
+  for STOCK/ETF/MUTUAL_FUND/CRYPTO; `source` defaults to MANUAL); goals `name`, `goal_type`,
+  `amount_today_paise`, `target_age`; loans `name`, `loan_type`, `outstanding_paise`,
+  `annual_rate`, `tenure_months`.
+- If both `risk_answers` and `risk_score` are sent, `risk_score` must equal their sum.
 
 ### Python Lambda — finance
 ```text

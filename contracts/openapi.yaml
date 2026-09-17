@@ -32,7 +32,7 @@ components:
             code:
               type: string
               enum: [VALIDATION_ERROR, UNAUTHORIZED, NOT_FOUND, UPSTREAM_UNAVAILABLE,
-                     INSUFFICIENT_DATA, INTERNAL]
+                     INSUFFICIENT_DATA, INTERNAL, NOT_IMPLEMENTED]
             message:
               type: string
             details:
@@ -91,6 +91,13 @@ components:
         emergency_fund_target_months: {type: integer, default: 6}
         risk_profile: {$ref: '#/components/schemas/RiskProfile'}
         risk_score: {type: integer}
+        risk_answers:
+          type: array
+          nullable: true
+          minItems: 4
+          maxItems: 4
+          items: {type: integer, minimum: 1, maximum: 3}
+        consent_accepted_at: {type: string, format: date-time, nullable: true}
         investment_horizon_years: {type: integer}
         strategy_goal: {$ref: '#/components/schemas/StrategyGoal'}
         dependents_count: {type: integer, nullable: true}

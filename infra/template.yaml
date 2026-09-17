@@ -7,6 +7,21 @@ Parameters:
     Type: Number
     Default: 1
     Description: Version number for the official Strands agents Lambda layer (aarch64, py3.13). Fill in latest at deploy time.
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: Google OAuth client ID for Cognito sign-in. Empty disables Google login.
+  FrontendCallbackUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173/login"
+    Description: OAuth callback/logout URLs for the SPA client.
+  FrontendOrigins:
+    Type: CommaDelimitedList
+    Default: "http://localhost:5173"
+    Description: Allowed CORS origins for the HTTP API.
+
+Conditions:
+  HasGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]
 
 Globals:
   Function:
@@ -42,6 +57,34 @@ Resources:
       PreventUserExistenceErrors: ENABLED
       SupportedIdentityProviders:
         - COGNITO
+        - !If [HasGoogle, !Ref GoogleIdentityProvider, !Ref "AWS::NoValue"]
+      AllowedOAuthFlowsUserPoolClient: !If [HasGoogle, true, !Ref "AWS::NoValue"]
+      AllowedOAuthFlows: !If [HasGoogle, [code], !Ref "AWS::NoValue"]
+      AllowedOAuthScopes: !If [HasGoogle, [openid, email, profile], !Ref "AWS::NoValue"]
+      CallbackURLs: !If [HasGoogle, !Ref FrontendCallbackUrls, !Ref "AWS::NoValue"]
+      LogoutURLs: !If [HasGoogle, !Ref FrontendCallbackUrls, !Ref "AWS::NoValue"]
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: HasGoogle
+    Properties:
+      Domain: !Sub "${AWS::StackName}-${AWS::AccountId}"
+      UserPoolId: !Ref UserPool
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasGoogle
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: "{{resolve:secretsmanager:aicfo/google:SecretString:client_secret}}"
+        authorize_scopes: "openid email profile"
+      AttributeMapping:
+        email: email
+        name: name
 
   # ---- Public API (HTTP API, JWT default authorizer) ----
   HttpApi:
@@ -49,8 +92,7 @@ Resources:
     Properties:
       StageName: $default
       CorsConfiguration:
-        AllowOrigins:
-          - http://localhost:3000
+        AllowOrigins: !Ref FrontendOrigins
         AllowMethods:
           - GET
           - POST
@@ -671,3 +713,7 @@ Outputs:
   DataBucketName:
     Description: Private S3 data bucket
     Value: !Ref DataBucket
+  CognitoDomain:
+    Condition: HasGoogle
+    Description: Cognito hosted domain for Google sign-in
+    Value: !Sub "${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"

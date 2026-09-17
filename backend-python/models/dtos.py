@@ -52,6 +52,8 @@ class UserProfile(BaseModel):
     emergency_fund_target_months: int = 6
     risk_profile: Optional[RiskProfile] = None
     risk_score: Optional[int] = None
+    risk_answers: Optional[list[int]] = None
+    consent_accepted_at: Optional[datetime] = None
     investment_horizon_years: Optional[int] = None
     strategy_goal: Optional[StrategyGoal] = None
     dependents_count: Optional[int] = None
