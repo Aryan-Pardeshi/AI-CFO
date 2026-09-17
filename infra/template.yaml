@@ -1,0 +1,673 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Personal AI CFO (aicfo-dev) — hour 0-3 stub. Cognito + HttpApi (JWT) + 3 Lambdas + DynamoDB + S3.
+
+Parameters:
+  StrandsLayerVersion:
+    Type: Number
+    Default: 1
+    Description: Version number for the official Strands agents Lambda layer (aarch64, py3.13). Fill in latest at deploy time.
+
+Globals:
+  Function:
+    Tracing: Active
+
+Resources:
+  # ---- Auth ----
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-users
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub ${AWS::StackName}-spa
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders:
+        - COGNITO
+
+  # ---- Public API (HTTP API, JWT default authorizer) ----
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - http://localhost:3000
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        AllowHeaders:
+          - Authorization
+          - Content-Type
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            JwtConfiguration:
+              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+              audience:
+                - !Ref UserPoolClient
+            IdentitySource: $request.header.Authorization
+
+  # ---- Compute ----
+  CrudFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-crud
+      CodeUri: ../backend-node/
+      Handler: index.handler
+      Runtime: nodejs22.x
+      Architectures:
+        - arm64
+      MemorySize: 512
+      Timeout: 10
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+          HOLDINGS_TABLE: !Ref HoldingsTable
+          GOALS_TABLE: !Ref GoalsTable
+          LOANS_TABLE: !Ref LoansTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref HoldingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref GoalsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LoansTable
+      Events:
+        GetMe:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /me
+              Method: GET
+        PutProfile:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /me/profile
+              Method: PUT
+        ListHoldings:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /holdings
+              Method: GET
+        CreateHolding:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /holdings
+              Method: POST
+        UpdateHolding:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /holdings/{holding_id}
+              Method: PUT
+        DeleteHolding:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /holdings/{holding_id}
+              Method: DELETE
+        ListGoals:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /goals
+              Method: GET
+        CreateGoal:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /goals
+              Method: POST
+        UpdateGoal:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /goals/{goal_id}
+              Method: PUT
+        DeleteGoal:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /goals/{goal_id}
+              Method: DELETE
+        ListLoans:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /loans
+              Method: GET
+        CreateLoan:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /loans
+              Method: POST
+        UpdateLoan:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /loans/{loan_id}
+              Method: PUT
+        DeleteLoan:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /loans/{loan_id}
+              Method: DELETE
+
+  FinanceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-finance
+      CodeUri: ../backend-python/
+      Handler: handlers.finance.handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      MemorySize: 1024
+      Timeout: 15
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref DataBucket
+          AGENT_FUNCTION_NAME: !Ref AgentFunction
+          USERS_TABLE: !Ref UsersTable
+          HOLDINGS_TABLE: !Ref HoldingsTable
+          GOALS_TABLE: !Ref GoalsTable
+          LOANS_TABLE: !Ref LoansTable
+          FIRE_SCENARIOS_TABLE: !Ref FireScenariosTable
+          TRANSACTIONS_TABLE: !Ref TransactionsTable
+          STATEMENT_JOBS_TABLE: !Ref StatementJobsTable
+          SNAPSHOTS_TABLE: !Ref SnapshotsTable
+          INSIGHTS_TABLE: !Ref InsightsTable
+          CONVERSATIONS_TABLE: !Ref ConversationsTable
+          CHAT_JOBS_TABLE: !Ref ChatJobsTable
+      Policies:
+        # Read across the boundary (Node-owned tables) — GetItem/Query only in code, never Scan.
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref HoldingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref GoalsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LoansTable
+        # Python-owned tables.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FireScenariosTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StatementJobsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SnapshotsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InsightsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatJobsTable
+        - S3CrudPolicy:
+            BucketName: !Ref DataBucket
+        - LambdaInvokePolicy:
+            FunctionName: !Ref AgentFunction
+        - Statement:
+            - Sid: AllowUpstoxFirecrawlSecrets
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/upstox-*
+                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/firecrawl-*
+      Events:
+        PostChat:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /chat
+              Method: POST
+        PortfolioAnalysis:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /portfolio/analysis
+              Method: GET
+        SecuritiesSearch:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /securities/search
+              Method: GET
+        SecuritiesDetail:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /securities/detail
+              Method: GET
+        SecuritiesHistory:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /securities/history
+              Method: GET
+        SecuritiesFit:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /securities/fit
+              Method: GET
+        SecuritiesShortTermFit:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /securities/short-term-fit
+              Method: GET
+        FireCalculate:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /fire/calculate
+              Method: POST
+        FireGoalImpact:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /fire/goal-impact
+              Method: POST
+        ListFireScenarios:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /fire/scenarios
+              Method: GET
+        SaveFireScenario:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /fire/scenarios
+              Method: POST
+        NetWorth:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /net-worth
+              Method: GET
+        NetWorthProjection:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /net-worth/projection
+              Method: GET
+        LoansEmi:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /loans/emi
+              Method: POST
+        LoansPrepayment:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /loans/prepayment-impact
+              Method: POST
+        CalcTax:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /calculators/tax
+              Method: POST
+        CalcGains:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /calculators/capital-gains
+              Method: POST
+        CalcInsurance:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /calculators/insurance
+              Method: POST
+        CalcCard:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /calculators/credit-card-payoff
+              Method: POST
+        CreateStatement:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /statements
+              Method: POST
+        ProcessStatement:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /statements/{job_id}/process
+              Method: POST
+        GetStatement:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /statements/{job_id}
+              Method: GET
+        CommitStatement:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /statements/{job_id}/commit
+              Method: POST
+        CashflowSummary:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /cashflow/summary
+              Method: GET
+
+  AgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-agent
+      CodeUri: ../backend-python/
+      Handler: handlers.agent.handler
+      Runtime: python3.13
+      Architectures:
+        - arm64
+      MemorySize: 1024
+      Timeout: 300
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:856699698935:layer:strands-agents-py3_13-aarch64:${StrandsLayerVersion}
+      # Async dispatch: retries MUST stay 0 (double-answer / double-bill on transient failure).
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref DataBucket
+          BEDROCK_MODEL_ID: global.amazon.nova-2-lite-v1:0
+          USERS_TABLE: !Ref UsersTable
+          HOLDINGS_TABLE: !Ref HoldingsTable
+          GOALS_TABLE: !Ref GoalsTable
+          LOANS_TABLE: !Ref LoansTable
+          FIRE_SCENARIOS_TABLE: !Ref FireScenariosTable
+          TRANSACTIONS_TABLE: !Ref TransactionsTable
+          STATEMENT_JOBS_TABLE: !Ref StatementJobsTable
+          SNAPSHOTS_TABLE: !Ref SnapshotsTable
+          INSIGHTS_TABLE: !Ref InsightsTable
+          CONVERSATIONS_TABLE: !Ref ConversationsTable
+          CHAT_JOBS_TABLE: !Ref ChatJobsTable
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref HoldingsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref GoalsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref LoansTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FireScenariosTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StatementJobsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SnapshotsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref InsightsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConversationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatJobsTable
+        - S3CrudPolicy:
+            BucketName: !Ref DataBucket
+        # Bedrock global inference (Nova 2 Lite) — all 3 statements required. See architecture.md.
+        - Statement:
+            - Sid: GrantGlobalCrisInferenceProfileRegionAccess
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Ref AWS::Region
+            - Sid: GrantGlobalCrisInferenceProfileInRegionModelAccess
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-2-lite-v1:0
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: !Ref AWS::Region
+                  bedrock:InferenceProfileArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0
+            - Sid: GrantGlobalCrisInferenceProfileGlobalModelAccess
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - arn:aws:bedrock:::foundation-model/amazon.nova-2-lite-v1:0
+              Condition:
+                StringEquals:
+                  aws:RequestedRegion: unspecified
+                  bedrock:InferenceProfileArn: !Sub arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/global.amazon.nova-2-lite-v1:0
+        - Statement:
+            - Sid: AllowUpstoxFirecrawlSecrets
+              Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/upstox-*
+                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/firecrawl-*
+      Events:
+        GetChat:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /chat/{job_id}
+              Method: GET
+        ListConversations:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /conversations
+              Method: GET
+        ListMessages:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /conversations/{conversation_id}/messages
+              Method: GET
+
+  # NOTE: AppSync Events API (namespace "jobs", channel /jobs/{sub}/{job_id}) is a
+  # separate small piece — intentionally NOT added in this hour 0-3 scaffold.
+
+  # ---- DynamoDB (PAY_PER_REQUEST, prefix aicfo-) ----
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+
+  HoldingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-holdings
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: holding_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: holding_id, KeyType: RANGE}
+
+  GoalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-goals
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: goal_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: goal_id, KeyType: RANGE}
+
+  LoansTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-loans
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: loan_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: loan_id, KeyType: RANGE}
+
+  FireScenariosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-fire-scenarios
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: scenario_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: scenario_id, KeyType: RANGE}
+
+  TransactionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-transactions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: txn_sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: txn_sk, KeyType: RANGE}
+
+  StatementJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-statement-jobs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: job_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: job_id, KeyType: RANGE}
+
+  SnapshotsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-snapshots
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: snapshot_date, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: snapshot_date, KeyType: RANGE}
+
+  InsightsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-insights
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: insight_sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: insight_sk, KeyType: RANGE}
+
+  ConversationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-conversations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_conv, AttributeType: S}
+        - {AttributeName: msg_sk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_conv, KeyType: HASH}
+        - {AttributeName: msg_sk, KeyType: RANGE}
+
+  ChatJobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-chat-jobs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: user_id, AttributeType: S}
+        - {AttributeName: job_id, AttributeType: S}
+      KeySchema:
+        - {AttributeName: user_id, KeyType: HASH}
+        - {AttributeName: job_id, KeyType: RANGE}
+
+  # ---- Files ----
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-data-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Suspended
+
+Outputs:
+  HttpApiUrl:
+    Description: Public HTTP API base URL
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  UserPoolId:
+    Description: Cognito User Pool ID (JWT issuer)
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Description: Cognito SPA client ID (JWT audience)
+    Value: !Ref UserPoolClient
+  DataBucketName:
+    Description: Private S3 data bucket
+    Value: !Ref DataBucket

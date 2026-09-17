@@ -1,0 +1,398 @@
+openapi: 3.0.3
+info:
+  title: Personal AI CFO API
+  version: 0.1.0
+  description: >
+    Source of truth for routes, DTOs, and enums. See .agents/api-contract.md for the
+    human-readable explanation of conventions (money as paise, auth via Cognito sub, error
+    shape, etc). Keep this file and that doc in sync in the same PR.
+
+servers:
+  - url: https://{apiId}.execute-api.ap-south-1.amazonaws.com
+    variables:
+      apiId:
+        default: TBD
+
+components:
+  securitySchemes:
+    CognitoJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [VALIDATION_ERROR, UNAUTHORIZED, NOT_FOUND, UPSTREAM_UNAVAILABLE,
+                     INSUFFICIENT_DATA, INTERNAL]
+            message:
+              type: string
+            details:
+              type: object
+
+    AssetType:
+      type: string
+      enum: [STOCK, ETF, MUTUAL_FUND, FD, CASH, CRYPTO, OTHER]
+    HoldingSource:
+      type: string
+      enum: [UPSTOX, MANUAL, DEMO, IMPORTED]
+    RiskProfile:
+      type: string
+      enum: [CONSERVATIVE, MODERATE, AGGRESSIVE]
+    StrategyGoal:
+      type: string
+      enum: [WEALTH_GROWTH, INCOME, CAPITAL_PRESERVATION, FIRE]
+    GoalType:
+      type: string
+      enum: [CAR, WEDDING, HOUSE_DOWN_PAYMENT, EDUCATION, TRAVEL, OTHER]
+    LoanType:
+      type: string
+      enum: [HOME, CAR, PERSONAL, EDUCATION, CREDIT_CARD, OTHER]
+    RateType:
+      type: string
+      enum: [FLOATING, FIXED]
+    Direction:
+      type: string
+      enum: [CREDIT, DEBIT]
+    TxnCategory:
+      type: string
+      enum: [INCOME, RENT, GROCERIES, FOOD_DELIVERY, DINING, TRANSPORT, SHOPPING, UTILITIES,
+             SUBSCRIPTIONS, EMI, INVESTMENTS, TRANSFER, HEALTH, EDUCATION, ENTERTAINMENT, OTHER]
+    StatementStatus:
+      type: string
+      enum: [PENDING_UPLOAD, UPLOADED, EXTRACTING, VALIDATING, REVIEW_REQUIRED, COMMITTED, FAILED]
+    ChatJobStatus:
+      type: string
+      enum: [QUEUED, RUNNING, COMPLETED, FAILED]
+    FlagSeverity:
+      type: string
+      enum: [info, warning, critical]
+
+    UserProfile:
+      type: object
+      properties:
+        user_id: {type: string, description: "Cognito sub"}
+        name: {type: string}
+        date_of_birth: {type: string, format: date}
+        base_currency: {type: string, default: INR}
+        monthly_income_paise: {type: integer, nullable: true}
+        monthly_expenses_paise: {type: integer, description: "excludes EMIs"}
+        monthly_investment_paise: {type: integer}
+        declared_net_worth_paise: {type: integer, nullable: true}
+        cash_balance_paise: {type: integer}
+        emergency_fund_target_months: {type: integer, default: 6}
+        risk_profile: {$ref: '#/components/schemas/RiskProfile'}
+        risk_score: {type: integer}
+        investment_horizon_years: {type: integer}
+        strategy_goal: {$ref: '#/components/schemas/StrategyGoal'}
+        dependents_count: {type: integer, nullable: true}
+        existing_term_cover_paise: {type: integer, nullable: true}
+        existing_health_cover_paise: {type: integer, nullable: true}
+        employment_type: {type: string, nullable: true}
+        city_tier: {type: string, nullable: true}
+        onboarding_step: {type: integer}
+        onboarded: {type: boolean}
+
+    Holding:
+      type: object
+      properties:
+        holding_id: {type: string}
+        asset_type: {$ref: '#/components/schemas/AssetType'}
+        source: {$ref: '#/components/schemas/HoldingSource'}
+        instrument_key: {type: string, nullable: true}
+        symbol: {type: string, nullable: true}
+        isin: {type: string, nullable: true}
+        name: {type: string}
+        quantity: {type: number, nullable: true}
+        avg_buy_price_paise: {type: integer, nullable: true}
+        first_buy_date: {type: string, format: date, nullable: true}
+        manual_current_value_paise: {type: integer, nullable: true}
+        sector: {type: string, nullable: true}
+        sip_monthly_paise: {type: integer, nullable: true}
+        fd_type: {type: string, enum: [CUMULATIVE, PAYOUT], nullable: true}
+        fd_principal_paise: {type: integer, nullable: true}
+        fd_annual_rate: {type: number, nullable: true}
+        fd_start_date: {type: string, format: date, nullable: true}
+        fd_maturity_date: {type: string, format: date, nullable: true}
+
+    Goal:
+      type: object
+      properties:
+        goal_id: {type: string}
+        name: {type: string}
+        goal_type: {$ref: '#/components/schemas/GoalType'}
+        amount_today_paise: {type: integer}
+        target_age: {type: integer}
+        inflation_rate: {type: number, description: "default 0.10 for EDUCATION, else 0.06"}
+        priority: {type: integer, nullable: true}
+
+    Loan:
+      type: object
+      properties:
+        loan_id: {type: string}
+        name: {type: string}
+        loan_type: {$ref: '#/components/schemas/LoanType'}
+        principal_paise: {type: integer}
+        outstanding_paise: {type: integer}
+        annual_rate: {type: number}
+        tenure_months: {type: integer}
+        start_date: {type: string, format: date}
+        rate_type: {$ref: '#/components/schemas/RateType'}
+        prepayment_charge_pct: {type: number, default: 0}
+
+    PortfolioAnalysis:
+      type: object
+      properties:
+        as_of: {type: string, format: date-time}
+        price_source: {type: string}
+        total_value_paise: {type: integer}
+        total_cost_paise: {type: integer}
+        unrealized_pnl_paise: {type: integer}
+        unrealized_pnl_pct: {type: number}
+        holdings:
+          type: array
+          items:
+            type: object
+            properties:
+              holding_id: {type: string}
+              symbol: {type: string}
+              asset_type: {$ref: '#/components/schemas/AssetType'}
+              quantity: {type: number}
+              price_paise: {type: integer}
+              value_paise: {type: integer}
+              weight_pct: {type: number}
+              pnl_paise: {type: integer}
+              price_as_of: {type: string, format: date-time}
+        allocation_by_asset_type:
+          type: array
+          items: {type: object, properties: {key: {type: string}, value_paise: {type: integer}, weight_pct: {type: number}}}
+        allocation_by_sector:
+          type: array
+          items: {type: object, properties: {key: {type: string}, value_paise: {type: integer}, weight_pct: {type: number}}}
+        risk:
+          type: object
+          properties:
+            annualized_volatility_pct: {type: number}
+            volatility_basis: {type: string}
+            max_drawdown_pct: {type: number}
+            cagr_pct: {type: number, nullable: true}
+            lookback: {type: string}
+        flags:
+          type: array
+          items:
+            type: object
+            properties:
+              code: {type: string}
+              symbol: {type: string}
+              weight_pct: {type: number}
+              threshold_pct: {type: number}
+              severity: {$ref: '#/components/schemas/FlagSeverity'}
+        warnings: {type: array, items: {type: string}}
+
+    FireResult:
+      type: object
+      properties:
+        fire_age: {type: integer, nullable: true}
+        required_corpus_at_fire_paise: {type: integer}
+        projected_corpus_at_fire_paise: {type: integer}
+        implied_withdrawal_rate_pct: {type: number}
+        conservative_fire_age: {type: integer, nullable: true}
+        progress_pct_today: {type: number}
+        assumptions:
+          type: object
+          properties:
+            inflation: {type: number}
+            step_up: {type: number}
+            return_before_40: {type: number}
+            return_40_to_60: {type: number}
+            return_after_60: {type: number}
+            post_fire_return: {type: number, nullable: true}
+            lifespan_age: {type: integer}
+        required_curve: {type: array, items: {type: object}}
+        projected_curve: {type: array, items: {type: object}}
+        warnings: {type: array, items: {type: string}}
+
+  parameters:
+    InstrumentKey:
+      name: instrument_key
+      in: query
+      required: true
+      schema: {type: string}
+      example: "NSE_EQ|INE040A01034"
+
+security:
+  - CognitoJwt: []
+
+paths:
+  # ---- Node Lambda (CRUD) ----
+  /me:
+    get:
+      summary: Get current user's profile
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/UserProfile'}}}}
+        '404': {description: Not onboarded, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /me/profile:
+    put:
+      summary: Update profile (used by onboarding steps)
+      requestBody:
+        content: {application/json: {schema: {$ref: '#/components/schemas/UserProfile'}}}
+      responses:
+        '200': {description: OK}
+
+  /holdings:
+    get:
+      summary: List holdings
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Holding'}}}}}
+    post:
+      summary: Add a holding
+      requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/Holding'}}}}
+      responses: {'201': {description: Created}}
+  /holdings/{holding_id}:
+    put:
+      summary: Update a holding
+      parameters: [{name: holding_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: OK}}
+    delete:
+      summary: Delete a holding
+      parameters: [{name: holding_id, in: path, required: true, schema: {type: string}}]
+      responses: {'204': {description: Deleted}}
+
+  /goals:
+    get:
+      summary: List goals
+      responses: {'200': {description: OK, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Goal'}}}}}}
+    post:
+      summary: Add a goal
+      requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/Goal'}}}}
+      responses: {'201': {description: Created}}
+  /goals/{goal_id}:
+    put: {summary: Update a goal, parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}], responses: {'200': {description: OK}}}
+    delete: {summary: Delete a goal, parameters: [{name: goal_id, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Deleted}}}
+
+  /loans:
+    get:
+      summary: List loans
+      responses: {'200': {description: OK, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Loan'}}}}}}
+    post:
+      summary: Add a loan
+      requestBody: {content: {application/json: {schema: {$ref: '#/components/schemas/Loan'}}}}
+      responses: {'201': {description: Created}}
+  /loans/{loan_id}:
+    put: {summary: Update a loan, parameters: [{name: loan_id, in: path, required: true, schema: {type: string}}], responses: {'200': {description: OK}}}
+    delete: {summary: Delete a loan, parameters: [{name: loan_id, in: path, required: true, schema: {type: string}}], responses: {'204': {description: Deleted}}}
+
+  # ---- Python Lambda (finance) ----
+  /portfolio/analysis:
+    get:
+      summary: Full portfolio analysis — value, weights, concentration flags, risk metrics
+      responses: {'200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/PortfolioAnalysis'}}}}}
+
+  /securities/search:
+    get:
+      summary: Search the local instrument index
+      parameters: [{name: q, in: query, required: true, schema: {type: string}}]
+      responses: {'200': {description: OK}}
+  /securities/detail:
+    get:
+      summary: Security overview (quote + profile + key ratios)
+      parameters: [{$ref: '#/components/parameters/InstrumentKey'}]
+      responses: {'200': {description: OK}}
+  /securities/history:
+    get:
+      summary: Historical candles
+      parameters:
+        - {$ref: '#/components/parameters/InstrumentKey'}
+        - {name: period, in: query, schema: {type: string, enum: [1y, 3y, 5y]}}
+      responses: {'200': {description: OK}}
+  /securities/fit:
+    get:
+      summary: Portfolio-fit impact of adding to a security
+      parameters:
+        - {$ref: '#/components/parameters/InstrumentKey'}
+        - {name: add_amount_paise, in: query, schema: {type: integer}}
+      responses: {'200': {description: OK}}
+  /securities/short-term-fit:
+    get:
+      summary: Rolling-window short-term return analysis (Level 3, calculators-seed)
+      parameters:
+        - {$ref: '#/components/parameters/InstrumentKey'}
+        - {name: horizon_months, in: query, schema: {type: integer}}
+      responses: {'200': {description: OK}}
+
+  /fire/calculate:
+    post:
+      summary: Compute FIRE age (see .agents/finance-rules.md for the locked fixture)
+      responses: {'200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/FireResult'}}}}}
+  /fire/goal-impact:
+    post:
+      summary: Compare baseline FIRE vs FIRE with one added goal
+      responses: {'200': {description: OK}}
+  /fire/scenarios:
+    get: {summary: List saved scenarios, responses: {'200': {description: OK}}}
+    post: {summary: Save a scenario, responses: {'201': {description: Created}}}
+
+  /net-worth:
+    get: {summary: Current net worth, responses: {'200': {description: OK}}}
+  /net-worth/projection:
+    get: {summary: Net worth projection (shares FIRE assumptions), responses: {'200': {description: OK}}}
+
+  /loans/emi:
+    post: {summary: EMI calculator, responses: {'200': {description: OK}}}
+  /loans/prepayment-impact:
+    post: {summary: Prepayment impact (reduce_tenure default), responses: {'200': {description: OK}}}
+
+  /calculators/tax:
+    post: {summary: Income tax estimate, both regimes, responses: {'200': {description: OK}}}
+  /calculators/capital-gains:
+    post: {summary: Capital gains estimate, responses: {'200': {description: OK}}}
+  /calculators/insurance:
+    post: {summary: Term/health cover estimate, responses: {'200': {description: OK}}}
+  /calculators/credit-card-payoff:
+    post: {summary: Card payoff calculator, responses: {'200': {description: OK}}}
+
+  /statements:
+    post: {summary: Create a statement job, get presigned upload URLs, responses: {'201': {description: Created}}}
+  /statements/{job_id}/process:
+    post:
+      summary: Trigger extraction/validation/categorization (async)
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
+      responses: {'202': {description: Accepted}}
+  /statements/{job_id}:
+    get:
+      summary: Get job status + extracted rows for review
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: OK}}
+  /statements/{job_id}/commit:
+    post:
+      summary: Commit reviewed rows to transactions
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: OK}}
+  /cashflow/summary:
+    get: {summary: Deterministic cash-flow metrics, responses: {'200': {description: OK}}}
+
+  # ---- Python Lambda (agent, async) ----
+  /chat:
+    post:
+      summary: Start a chat job (async — see .agents/architecture.md for the AppSync flow)
+      responses: {'202': {description: Accepted}}
+  /chat/{job_id}:
+    get:
+      summary: Poll chat job status / final answer
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: OK}}
+  /conversations:
+    get: {summary: List conversations, responses: {'200': {description: OK}}}
+  /conversations/{conversation_id}/messages:
+    get:
+      summary: List messages in a conversation
+      parameters: [{name: conversation_id, in: path, required: true, schema: {type: string}}]
+      responses: {'200': {description: OK}}
