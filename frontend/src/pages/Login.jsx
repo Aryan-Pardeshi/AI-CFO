@@ -16,6 +16,8 @@ function routeAfterSignIn(profile) {
 
 const MOCK_MODE = import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true';
 const COGNITO_DOMAIN = import.meta.env.VITE_COGNITO_DOMAIN;
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL;
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD;
 
 const Login = () => {
   const [error, setError] = useState('');
@@ -93,6 +95,33 @@ const Login = () => {
     }
   };
 
+  const handleDemo = async () => {
+    setError('');
+    if (!MOCK_MODE && (!DEMO_EMAIL || !DEMO_PASSWORD)) {
+      setError("Demo login isn't configured yet — use email for now");
+      return;
+    }
+    setLoading(true);
+    try {
+      const email = DEMO_EMAIL || 'demo@aicfo.app';
+      const password = DEMO_PASSWORD || 'demo';
+      const result = await signInUser({ email, password });
+      if (result?.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
+        setError('Demo account is unverified — ask the team to fix the seeded demo user');
+        return;
+      }
+      const profile = await getMe().catch((err) => {
+        if (err && (err.status === 404 || err.code === 'NOT_FOUND')) return null;
+        throw err;
+      });
+      navigate(routeAfterSignIn(profile), { replace: true });
+    } catch (err) {
+      setError(err?.message || 'Demo login failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{
       width: '100%',
@@ -130,6 +159,12 @@ const Login = () => {
         <GoogleIcon />
         Continue with Google
       </Button>
+
+      <div style={{ marginTop: '0.75rem' }}>
+        <Button variant="outline" type="button" onClick={handleDemo} disabled={loading}>
+          Try the Demo
+        </Button>
+      </div>
 
       <div style={{ marginTop: '2.5rem', textAlign: 'center', fontSize: '0.875rem' }}>
         <span style={{ color: 'var(--text-secondary)' }}>Don&apos;t have an account? </span>
