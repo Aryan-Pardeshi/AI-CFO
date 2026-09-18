@@ -23,7 +23,7 @@ async function list(tableName, userId) {
     })
   );
   // List shape follows contracts/openapi.yaml: a bare JSON array.
-  return res.Items || [];
+  return (res && res.Items) || [];
 }
 
 async function create(tableName, userId, idField, value) {

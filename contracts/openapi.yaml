@@ -32,7 +32,7 @@ components:
             code:
               type: string
               enum: [VALIDATION_ERROR, UNAUTHORIZED, NOT_FOUND, UPSTREAM_UNAVAILABLE,
-                     INSUFFICIENT_DATA, INTERNAL, NOT_IMPLEMENTED]
+                     INSUFFICIENT_DATA, INTERNAL, NOT_IMPLEMENTED, CONFLICT]
             message:
               type: string
             details:
@@ -137,7 +137,9 @@ components:
         name: {type: string}
         goal_type: {$ref: '#/components/schemas/GoalType'}
         amount_today_paise: {type: integer}
+        current_saved_paise: {type: integer, minimum: 0, maximum: 10000000000}
         target_age: {type: integer}
+        target_date: {type: string, format: date}
         inflation_rate: {type: number, description: "default 0.10 for EDUCATION, else 0.06"}
         priority: {type: integer, nullable: true}
 
@@ -306,6 +308,291 @@ components:
         curve: {type: array, items: {type: object, properties: {age: {type: integer}, corpus_paise: {type: integer}}}}
         warnings: {type: array, items: {type: string}}
 
+    RupeeDecimal:
+      type: string
+      pattern: '^(?:[0-9]+(?:\.[0-9]{1,2})?)?$'
+      description: Non-negative rupee amount as a decimal string; an empty string means optional/absent at the UI compatibility boundary.
+
+    FinancialMoneyObject:
+      type: object
+      description: Object whose numeric leaf values are rupee decimal strings at the UI compatibility boundary.
+      additionalProperties:
+        oneOf:
+          - {$ref: '#/components/schemas/RupeeDecimal'}
+          - {$ref: '#/components/schemas/FinancialMoneyObject'}
+
+    DashboardManualFinancials:
+      type: object
+      required: [onboardingMethod, incomes, liquidAssets, portfolio, preferences, liabilities, monthlyExpenses]
+      properties:
+        onboardingMethod: {type: string, enum: [manual_advanced]}
+        incomes: {$ref: '#/components/schemas/FinancialMoneyObject'}
+        liquidAssets: {$ref: '#/components/schemas/FinancialMoneyObject'}
+        portfolio:
+          type: array
+          items:
+            type: object
+            required: [type, ticker, buyPrice, quantity]
+            properties:
+              type: {type: string}
+              ticker: {type: string}
+              buyPrice: {$ref: '#/components/schemas/RupeeDecimal'}
+              quantity: {type: string, pattern: '^[0-9]+(?:\.[0-9]+)?$'}
+        preferences:
+          type: object
+          required: [industries, instruments]
+          properties:
+            industries: {type: array, items: {type: string}}
+            instruments: {type: array, items: {type: string}}
+        liabilities: {$ref: '#/components/schemas/FinancialMoneyObject'}
+        monthlyExpenses: {$ref: '#/components/schemas/FinancialMoneyObject'}
+
+    DashboardCsvFinancials:
+      type: object
+      required: [onboardingMethod, extractedData]
+      properties:
+        onboardingMethod: {type: string, enum: [csv_extraction]}
+        extractedData:
+          type: object
+          required: [fileName, totalTransactions, currentBalance, monthlyRevenue, monthlyExpenses]
+          properties:
+            fileName: {type: string}
+            totalTransactions: {type: integer, minimum: 0}
+            currentBalance: {$ref: '#/components/schemas/RupeeDecimal'}
+            monthlyRevenue: {$ref: '#/components/schemas/RupeeDecimal'}
+            monthlyExpenses: {$ref: '#/components/schemas/RupeeDecimal'}
+
+    DashboardFinancials:
+      oneOf:
+        - {$ref: '#/components/schemas/DashboardManualFinancials'}
+        - {$ref: '#/components/schemas/DashboardCsvFinancials'}
+      description: Manual dashboard snapshot or the CSV extraction snapshot consumed by Aviral's UI.
+
+    DashboardFinancialsRequest:
+      type: object
+      required: [financials]
+      properties:
+        financials: {$ref: '#/components/schemas/DashboardFinancials'}
+
+    DashboardProfileResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          type: object
+          required: [hasOnboarded, financials]
+          properties:
+            hasOnboarded: {type: boolean}
+            financials: {$ref: '#/components/schemas/DashboardFinancials'}
+
+    PricesResponse:
+      type: object
+      required: [prices, source, as_of]
+      properties:
+        prices:
+          type: object
+          additionalProperties: {type: number}
+        quotes:
+          type: object
+          description: Additive quote details when the upstream returns them; legacy consumers may continue using prices.
+          additionalProperties:
+            type: object
+            required: [price]
+            properties:
+              price: {type: number}
+              changePercent: {type: number}
+              currency: {type: string, description: "Always INR for securities; index levels, futures and FX pairs keep Yahoo's native currency."}
+              originalPrice: {type: number, description: "Source price when a non-INR quote was converted to rupees."}
+              originalCurrency: {type: string, description: "Source currency when a non-INR quote was converted to rupees."}
+        source: {type: string, enum: [Yahoo Finance]}
+        as_of: {type: string, format: date-time}
+
+    NewsResponse:
+      type: object
+      required: [news, source, as_of]
+      properties:
+        news:
+          type: array
+          items:
+            type: object
+            required: [id, ticker, title, publisher, link, publishedAt, summary]
+            properties:
+              id: {type: string}
+              ticker: {type: string}
+              title: {type: string}
+              publisher: {type: string}
+              link: {type: string, format: uri}
+              publishedAt: {type: string, format: date-time}
+              summary: {type: string}
+              thumbnail: {type: string, format: uri, nullable: true}
+        source:
+          type: string
+          description: "The providers that actually contributed items, e.g. 'Yahoo Finance', 'Google News' or 'Yahoo Finance, Google News'."
+          example: Yahoo Finance, Google News
+        as_of: {type: string, format: date-time}
+
+    HistoricalResponse:
+      type: object
+      required: [range, data, availableLines, source, as_of]
+      properties:
+        range: {type: string, enum: [1W, 1M, 3M, 6M, 1Y, ALL]}
+        data:
+          type: array
+          description: Data points with normalized percentage returns; object fields are supplied by the selected lines.
+          items: {type: object}
+        availableLines: {type: array, items: {type: string}}
+        source: {type: string, enum: [Yahoo Finance]}
+        as_of: {type: string, format: date-time}
+
+    SuggestionsResponse:
+      type: object
+      required: [suggestions, activePreferences]
+      properties:
+        suggestions:
+          type: array
+          items:
+            type: object
+            required: [ticker, name, industry, instrument, price, change, rationale]
+            properties:
+              ticker: {type: string}
+              name: {type: string}
+              industry: {type: string}
+              instrument: {type: string}
+              price: {type: number}
+              change: {type: string, pattern: '^[+-]?[0-9]+(?:\.[0-9]+)?%$'}
+              rationale: {type: string}
+        activePreferences:
+          type: object
+          required: [industries, instruments]
+          properties:
+            industries: {type: array, items: {type: string}}
+            instruments: {type: array, items: {type: string}}
+
+    StatementCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [file_name, input_type, content_type]
+      properties:
+        job_id: {type: string, format: uuid}
+        file_name: {type: string, minLength: 1, maxLength: 255, pattern: '^[^/\\\\]+\\.csv$'}
+        input_type: {type: string, enum: [csv]}
+        content_type: {type: string, enum: [text/csv]}
+      description: Client identity fields are not accepted; identity is the verified Cognito sub.
+
+    StatementUpload:
+      type: object
+      required: [url, key, expires_in]
+      properties:
+        url: {type: string, format: uri}
+        key: {type: string}
+        expires_in: {type: integer, enum: [900]}
+
+    StatementCreateResponse:
+      type: object
+      required: [job_id, status, file_name, upload]
+      properties:
+        job_id: {type: string, format: uuid}
+        status: {type: string, enum: [PENDING_UPLOAD]}
+        file_name: {type: string}
+        upload: {$ref: '#/components/schemas/StatementUpload'}
+
+    TransactionRow:
+      type: object
+      additionalProperties: false
+      required: [txn_id, txn_date, description, amount_paise, direction, category, category_source]
+      properties:
+        txn_id: {type: string, maxLength: 120}
+        txn_date: {type: string, format: date}
+        description: {type: string, minLength: 1, maxLength: 500}
+        amount_paise: {type: integer, minimum: 1}
+        direction: {$ref: '#/components/schemas/Direction'}
+        category: {$ref: '#/components/schemas/TxnCategory'}
+        category_source: {type: string, enum: [rule, user]}
+        balance_paise: {type: integer, nullable: true}
+
+    StatementValidationSummary:
+      type: object
+      required: [row_count, credit_total_paise, debit_total_paise, net_paise, reconciled, balance_delta_paise]
+      properties:
+        row_count: {type: integer, minimum: 0, maximum: 1000}
+        credit_total_paise: {type: integer, minimum: 0}
+        debit_total_paise: {type: integer, minimum: 0}
+        net_paise: {type: integer}
+        reconciled: {type: boolean}
+        balance_delta_paise: {type: integer, minimum: 0, maximum: 1}
+
+    StatementReconciliationSummary:
+      type: object
+      required: [reconciled, balance_delta_paise]
+      properties:
+        reconciled: {type: boolean}
+        balance_delta_paise: {type: integer, minimum: 0, maximum: 1}
+
+    StatementResponse:
+      type: object
+      required: [job_id, status, validation_summary, reconciliation_summary, review_rows]
+      properties:
+        job_id: {type: string, format: uuid}
+        file_name: {type: string}
+        status: { $ref: '#/components/schemas/StatementStatus' }
+        validation_summary: {$ref: '#/components/schemas/StatementValidationSummary'}
+        reconciliation_summary: {$ref: '#/components/schemas/StatementReconciliationSummary'}
+        review_rows:
+          type: array
+          maxItems: 1000
+          items: {$ref: '#/components/schemas/TransactionRow'}
+
+    StatementCommitRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reviewed_rows:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: {$ref: '#/components/schemas/TransactionRow'}
+        confirm_stored_rows: {type: boolean, enum: [true]}
+      description: Send reviewed_rows or explicitly confirm_stored_rows=true. Required only while status is REVIEW_REQUIRED.
+
+    StatementCommitResponse:
+      type: object
+      required: [job_id, status, summary, committed_row_count]
+      properties:
+        job_id: {type: string, format: uuid}
+        status: {type: string, enum: [COMMITTED]}
+        summary:
+          type: object
+          required: [months, totals]
+          properties:
+            months: {type: array, items: {$ref: '#/components/schemas/CashflowMonth'}}
+            totals: {$ref: '#/components/schemas/CashflowTotals'}
+        committed_row_count: {type: integer, minimum: 0, maximum: 1000}
+
+    CashflowMonth:
+      type: object
+      required: [month, income_paise, expense_paise, net_paise]
+      properties:
+        month: {type: string, pattern: '^\\d{4}-\\d{2}$'}
+        income_paise: {type: integer, minimum: 0}
+        expense_paise: {type: integer, minimum: 0}
+        net_paise: {type: integer}
+
+    CashflowTotals:
+      type: object
+      required: [income_paise, expense_paise, net_paise]
+      properties:
+        income_paise: {type: integer, minimum: 0}
+        expense_paise: {type: integer, minimum: 0}
+        net_paise: {type: integer}
+
+    CashflowSummary:
+      type: object
+      required: [months, totals, current_balance_paise]
+      properties:
+        months: {type: array, items: {$ref: '#/components/schemas/CashflowMonth'}}
+        totals: {$ref: '#/components/schemas/CashflowTotals'}
+        current_balance_paise: {type: integer, nullable: true}
+
   parameters:
     InstrumentKey:
       name: instrument_key
@@ -313,6 +600,22 @@ components:
       required: true
       schema: {type: string}
       example: "NSE_EQ|INE040A01034"
+    Tickers:
+      name: tickers
+      in: query
+      required: false
+      style: form
+      explode: false
+      description: Optional comma-separated, sanitized Yahoo ticker symbols; no more than 20 symbols are accepted when present. Endpoint-specific server-side scoping still applies.
+      schema:
+        type: array
+        minItems: 1
+        maxItems: 20
+        items:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._^=-]{0,19}$'
 
 security:
   - CognitoJwt: []
@@ -332,6 +635,65 @@ paths:
         content: {application/json: {schema: {$ref: '#/components/schemas/UserProfile'}}}
       responses:
         '200': {description: OK}
+
+  # ---- Node Lambda (dashboard and market compatibility routes) ----
+  /dashboard/profile:
+    get:
+      summary: Get the authenticated user's dashboard profile snapshot
+      description: Identity comes only from the Cognito JWT sub; no email or user_id query input is accepted. Returns 200 with default financials when the profile or snapshot is missing.
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/DashboardProfileResponse'}}}}
+        '500': {description: Internal error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /dashboard/financials:
+    put:
+      summary: Update the authenticated user's dashboard financial snapshot
+      description: UI money values are rupee decimal strings here; canonical storage and math remain integer paise. Identity comes from the Cognito JWT sub.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/DashboardFinancialsRequest'}}}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/DashboardProfileResponse'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '500': {description: Internal error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+
+  /portfolio/prices:
+    get:
+      summary: Get current prices for up to 20 sanitized tickers
+      description: Yahoo failures may yield partial results. Current prices are never fabricated; failures use UPSTREAM_UNAVAILABLE.
+      parameters: [{$ref: '#/components/parameters/Tickers'}]
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/PricesResponse'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '502': {description: Upstream unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /portfolio/news:
+    get:
+      summary: Get news for up to 20 sanitized tickers
+      description: News is limited to the authenticated user's held tickers plus deterministic candidates matching saved investment interests. Yahoo failures may yield partial results. News is never fabricated; total upstream failure uses UPSTREAM_UNAVAILABLE.
+      parameters: [{$ref: '#/components/parameters/Tickers'}]
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/NewsResponse'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '502': {description: Upstream unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /portfolio/historical:
+    get:
+      summary: Get normalized percentage-return history for up to 20 sanitized tickers
+      description: Requested symbols are intersected with the authenticated user's held portfolio, with at most 18 holdings plus NIFTY 50 and S&P 500 benchmarks. Historical data is never fabricated; Yahoo failures may yield partial results and use UPSTREAM_UNAVAILABLE when no result is available.
+      parameters:
+        - {$ref: '#/components/parameters/Tickers'}
+        - name: range
+          in: query
+          required: false
+          schema: {type: string, enum: [1W, 1M, 3M, 6M, 1Y, ALL], default: 1Y}
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/HistoricalResponse'}}}}
+        '400': {description: Validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '502': {description: Upstream unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+  /portfolio/suggestions:
+    get:
+      summary: Get deterministic educational portfolio-fit ideas
+      description: Suggestions derive preferences, risk, and holdings server-side. No preference or user identity query inputs are accepted; suggestions are not buy/sell advice.
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/SuggestionsResponse'}}}}
 
   /holdings:
     get:
@@ -468,24 +830,48 @@ paths:
     post: {summary: Card payoff calculator, responses: {'200': {description: OK}}}
 
   /statements:
-    post: {summary: Create a statement job, get presigned upload URLs, responses: {'201': {description: Created}}}
+    post:
+      summary: Create a bounded CSV statement job and presigned S3 PUT URL
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StatementCreateRequest'}}}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/StatementCreateResponse'}}}}
+        '400': {description: Unsupported input or client identity field, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /statements/{job_id}/process:
     post:
-      summary: Trigger extraction/validation/categorization (async)
-      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
-      responses: {'202': {description: Accepted}}
+      summary: Parse, validate, categorize, and persist a review artifact; never commits transactions
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '202': {description: Review required, content: {application/json: {schema: {$ref: '#/components/schemas/StatementResponse'}}}}
+        '400': {description: CSV validation error, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '404': {description: Job is not owned by the authenticated user, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: Job is already committed, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '502': {description: Uploaded object unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /statements/{job_id}:
     get:
       summary: Get job status + extracted rows for review
-      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: OK}}
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/StatementResponse'}}}}
+        '404': {description: Job is not owned by the authenticated user, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /statements/{job_id}/commit:
     post:
-      summary: Commit reviewed rows to transactions
-      parameters: [{name: job_id, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {description: OK}}
+      summary: Explicitly commit reviewed rows to the authenticated user's transactions
+      parameters: [{name: job_id, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StatementCommitRequest'}}}
+      responses:
+        '200': {description: Committed or already committed, content: {application/json: {schema: {$ref: '#/components/schemas/StatementCommitResponse'}}}}
+        '400': {description: Review rows invalid or explicit confirmation missing, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '404': {description: Job is not owned by the authenticated user, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '409': {description: Job is not REVIEW_REQUIRED, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /cashflow/summary:
-    get: {summary: Deterministic cash-flow metrics, responses: {'200': {description: OK}}}
+    get:
+      summary: Query authenticated transactions and return deterministic monthly paise totals
+      responses:
+        '200': {description: OK, content: {application/json: {schema: {$ref: '#/components/schemas/CashflowSummary'}}}}
 
   # ---- Python Lambda (agent, async) ----
   /chat:

@@ -126,6 +126,103 @@ CRUD behavior (implemented in `backend-node/`):
   `annual_rate`, `tenure_months`.
 - If both `risk_answers` and `risk_score` are sent, `risk_score` must equal their sum.
 
+### Node Lambda (dashboard and market compatibility routes) — `/dashboard/*`, `/portfolio/*`
+```text
+GET  /dashboard/profile
+PUT  /dashboard/financials
+GET  /portfolio/prices[?tickers=TICKER1,TICKER2]
+GET  /portfolio/news[?tickers=TICKER1,TICKER2]
+GET  /portfolio/historical[?tickers=TICKER1,TICKER2&range=1Y]
+GET  /portfolio/suggestions
+```
+
+These routes are on the existing Cognito-authorized `CrudFunction`. Identity always comes from
+the verified JWT `sub`; none accepts email or `user_id`, and `/portfolio/suggestions` accepts no
+preference or identity query inputs. `tickers` is an optional comma-separated list of 1–20
+sanitized Yahoo symbols (`[A-Za-z0-9][A-Za-z0-9._^=-]{0,19}`, plus the four allowlisted index
+symbols `^NSEI`, `^BSESN`, `^GSPC`, `^IXIC`) when present. Prices may request
+that safe bounded list for the fixed Yahoo host. News is restricted to the authenticated user's
+holdings plus deterministic candidates matching saved investment interests. History intersects
+requested symbols with authenticated holdings and reserves two of its 20 slots for NIFTY 50 and
+S&P 500 benchmark lines. `range` is one of `1W`, `1M`, `3M`, `6M`, `1Y`, or `ALL` and defaults to
+`1Y`.
+
+`GET /dashboard/profile` always returns `200`, including default financials when the profile or
+financial snapshot is missing. `PUT /dashboard/financials` accepts `{ "financials":
+DashboardFinancials }`.
+
+A user who finished the guided onboarding has no saved dashboard snapshot, so the same shape is
+derived from canonical data (nothing is invented; a value with no source is left out):
+`incomes.total` and `monthlyExpenses["Living expenses"]` from the profile, `liquidAssets.bankBalance`
+from `cash_balance_paise` and `liquidAssets.fixedDeposits` from FD principals, `liabilities.<key>`
+(`homeLoanEmi`, `carLoanEmi`, `personalLoanEmi`, `educationLoanEmi`, `creditCardDebt`,
+`otherLoanEmi`) as each loan's monthly EMI from the locked reducing-balance formula, and
+`portfolio` from non-FD holdings. A bare NSE symbol from onboarding (`RELIANCE`) is listed as
+`RELIANCE.NS` so Yahoo can price it; mutual funds keep their symbol and are not priced (no Yahoo
+NAV), which the UI shows as unavailable.
+
+The dashboard compatibility boundary uses camelCase because it is consumed directly by the
+approved UI. Its exact response shape is:
+```json
+{
+  "user": {
+    "hasOnboarded": true,
+    "financials": {
+      "onboardingMethod": "manual_advanced",
+      "incomes": {"salary": "85000.00", "other": "0.00"},
+      "liquidAssets": {"cash": "120000.50", "bank": "50000.00"},
+      "portfolio": [{"type": "STOCK", "ticker": "RELIANCE", "buyPrice": "2500.00", "quantity": "10"}],
+      "preferences": {"industries": ["BANKING"], "instruments": ["ETF"]},
+      "liabilities": {"loans": "400000.00"},
+      "monthlyExpenses": {"total": "50000.00", "housing": "25000.00"}
+    }
+  }
+}
+```
+`incomes`, `liquidAssets`, `liabilities`, and `monthlyExpenses` are objects whose numeric leaf
+values are rupee decimal strings. `portfolio.quantity` and `portfolio.buyPrice` are also UI
+strings. Conversion to canonical integer paise (and quantity validation) happens at the
+boundary; storage and financial math remain canonical backend types. Optional manual-entry money
+leaves may be `""`; the canonical conversion treats blank as absent/zero.
+
+The CSV extraction variant accepted by `PUT /dashboard/financials` is:
+```json
+{
+  "financials": {
+    "onboardingMethod": "csv_extraction",
+    "extractedData": {
+      "fileName": "statement.csv",
+      "totalTransactions": 42,
+      "currentBalance": "120000.50",
+      "monthlyRevenue": "85000.00",
+      "monthlyExpenses": "50000.00"
+    }
+  }
+}
+```
+
+Market compatibility DTOs are:
+```json
+{"prices": {"RELIANCE.NS": 2980.25, "AAPL": 18000}, "quotes": {"RELIANCE.NS": {"price": 2980.25, "changePercent": 0.42, "currency": "INR"}, "AAPL": {"price": 18000, "changePercent": 1.5, "currency": "INR", "originalPrice": 200, "originalCurrency": "USD"}}, "source": "Yahoo Finance", "as_of": "2026-09-18T09:31:00Z"}
+{"news": [{"id": "n1", "ticker": "RELIANCE", "title": "...", "publisher": "...", "link": "https://example.com", "publishedAt": "2026-09-18T09:31:00Z", "summary": "...", "thumbnail": "https://example.com/image.png"}], "source": "Yahoo Finance, Google News", "as_of": "2026-09-18T09:31:00Z"}
+{"range": "1Y", "data": [{"date": "2026-09-18", "RELIANCE": 0}], "availableLines": ["RELIANCE"], "source": "Yahoo Finance", "as_of": "2026-09-18T09:31:00Z"}
+{"suggestions": [{"ticker": "NIFTYBEES.NS", "name": "Nifty 50 ETF", "industry": "Broad Market Index", "instrument": "Index ETF", "price": 266.53, "change": "+0.17%", "rationale": "It is on the steadier side, which might suit a moderate risk profile. You don't hold any funds yet, so this might add a different kind of exposure."}], "activePreferences": {"industries": ["Technology & Software"], "instruments": ["Index & Mutual Funds"]}}
+```
+The historical `data` values are normalized percentage returns. Prices, news, and history are
+never fabricated. Yahoo failures may produce partial results; if no usable upstream result is
+available, return the existing `UPSTREAM_UNAVAILABLE` error code. Suggestions are deterministic
+educational fit ideas, never buy/sell advice.
+
+Price semantics: security quotes are always rupees. A non-INR quote is converted with the live
+`<CUR>INR=X` rate (`originalPrice` / `originalCurrency` keep the source value) and is left out when
+no rate is available. Index levels (`^…`), futures (`…=F`) and FX pairs (`…=X`) keep Yahoo's native
+units. News is Yahoo first; a ticker with no Yahoo items falls back to Google News RSS (real
+headlines with their publisher), items older than 45 days and price/quote landing pages are
+dropped, and the response `source` names the providers that actually contributed. Suggestion
+`industry` and `instrument` are display labels, and `rationale` is hedged fit text built from the
+user's risk profile, saved interests and current holdings (it never claims a risk fit when no risk
+profile is set).
+
 ### Python Lambda — finance
 ```text
 GET  /portfolio/analysis

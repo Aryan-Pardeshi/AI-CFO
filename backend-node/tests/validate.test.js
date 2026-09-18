@@ -253,6 +253,40 @@ describe("validateGoal target_age bounds", () => {
   });
 });
 
+describe("validateGoal persisted progress and target date", () => {
+  it("accepts optional saved paise and ISO target date and preserves them", () => {
+    const r = validateGoal(
+      {
+        name: "Emergency fund",
+        goal_type: "OTHER",
+        amount_today_paise: 500000,
+        current_saved_paise: 125050,
+        target_age: 35,
+        target_date: "2030-04-15",
+      },
+      null,
+      { requireCreate: true },
+    );
+    assert.equal(r.errors.length, 0);
+    assert.equal(r.value.current_saved_paise, 125050);
+    assert.equal(r.value.target_date, "2030-04-15");
+  });
+
+  it("rejects saved paise outside the non-negative 10 crore bound", () => {
+    for (const value of [-1, 10_000_000_001, 1.5]) {
+      const r = validateGoal({ current_saved_paise: value });
+      assert.ok(r.errors.includes("current_saved_paise"), `value=${value}`);
+    }
+  });
+
+  it("rejects invalid target dates", () => {
+    for (const value of ["2030-02-30", "2030-4-15", "not-a-date", 20300101]) {
+      const r = validateGoal({ target_date: value });
+      assert.ok(r.errors.includes("target_date"), `value=${value}`);
+    }
+  });
+});
+
 describe("applyGoalDefaults", () => {
   it("sets 0.10 for EDUCATION when omitted", () => {
     const out = applyGoalDefaults({ goal_type: "EDUCATION" });

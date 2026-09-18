@@ -12,7 +12,7 @@ async function getProfile(userId) {
   const res = await doc.send(
     new GetCommand({ TableName: tables().users, Key: { user_id: userId } })
   );
-  return res.Item;
+  return res && res.Item;
 }
 
 async function updateProfile(userId, value) {
@@ -42,7 +42,7 @@ async function updateProfile(userId, value) {
       ReturnValues: "ALL_NEW",
     })
   );
-  return res.Attributes || {};
+  return (res && res.Attributes) || {};
 }
 
 async function getDateOfBirth(userId) {
@@ -50,7 +50,7 @@ async function getDateOfBirth(userId) {
   const res = await doc.send(
     new GetCommand({ TableName: tables().users, Key: { user_id: userId } })
   );
-  const dob = res.Item && res.Item.date_of_birth;
+  const dob = res && res.Item && res.Item.date_of_birth;
   return typeof dob === "string" ? dob : null;
 }
 

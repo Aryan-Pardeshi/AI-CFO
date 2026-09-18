@@ -1,18 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Hub } from 'aws-amplify/utils';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import GoogleIcon from '../components/GoogleIcon';
 import { getMe } from '../lib/api.js';
 import { getCurrentAuthUser, signInUser, signInWithGoogleRedirect } from '../lib/auth.js';
-
-function routeAfterSignIn(profile) {
-  if (!profile || profile.onboarded === false || profile.onboarded === undefined) {
-    return '/onboarding';
-  }
-  return '/dashboard';
-}
+import { useAuth } from '../context/AuthContext.jsx';
 
 const MOCK_MODE = import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true';
 const COGNITO_DOMAIN = import.meta.env.VITE_COGNITO_DOMAIN;
@@ -23,7 +17,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
+  const { login } = useAuth();
 
   useEffect(() => {
     const unsub = Hub.listen('auth', ({ payload }) => {
@@ -40,13 +34,14 @@ const Login = () => {
 
   async function afterAuth() {
     try {
+      await login();
       const profile = await getMe();
       if (profile && typeof profile.onboarding_step === 'number') {
-        navigate(profile.onboarded ? '/dashboard' : '/onboarding', { replace: true });
+        navigate(profile.onboarded ? '/overview' : '/onboarding', { replace: true });
       } else if (!profile || profile.onboarded === false) {
         navigate('/onboarding', { replace: true });
       } else {
-        navigate('/dashboard', { replace: true });
+        navigate('/overview', { replace: true });
       }
     } catch (err) {
       if (err && (err.status === 404 || err.code === 'NOT_FOUND')) {
@@ -67,11 +62,7 @@ const Login = () => {
         navigate(`/confirm?email=${encodeURIComponent(email)}`);
         return;
       }
-      const profile = await getMe().catch((err) => {
-        if (err && (err.status === 404 || err.code === 'NOT_FOUND')) return null;
-        throw err;
-      });
-      navigate(routeAfterSignIn(profile), { replace: true });
+      await afterAuth();
     } catch (err) {
       setError(err?.message || 'Login failed');
     } finally {
@@ -87,9 +78,7 @@ const Login = () => {
     }
     try {
       await signInWithGoogleRedirect();
-      if (location) {
-        await afterAuth();
-      }
+      await afterAuth();
     } catch (err) {
       setError(err?.message || 'Google sign-in failed');
     }
@@ -110,11 +99,7 @@ const Login = () => {
         setError('Demo account is unverified — ask the team to fix the seeded demo user');
         return;
       }
-      const profile = await getMe().catch((err) => {
-        if (err && (err.status === 404 || err.code === 'NOT_FOUND')) return null;
-        throw err;
-      });
-      navigate(routeAfterSignIn(profile), { replace: true });
+      await afterAuth();
     } catch (err) {
       setError(err?.message || 'Demo login failed');
     } finally {

@@ -1,44 +1,57 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
-import RequireAuth from './components/RequireAuth';
+import DashboardLayout from './components/DashboardLayout';
 import Register from './pages/Register';
-import ConfirmSignUp from './pages/ConfirmSignUp';
 import Login from './pages/Login';
+import ConfirmSignUp from './pages/ConfirmSignUp';
 import Onboarding from './pages/Onboarding';
-import Dashboard from './pages/Dashboard';
+import OnboardingMethod from './pages/OnboardingMethod';
+import ManualEntry from './pages/ManualEntry';
+import CSVUpload from './pages/CSVUpload';
+import Overview from './pages/dashboard/Overview';
+import Advisory from './pages/dashboard/Advisory';
+import Milestones from './pages/dashboard/Milestones';
+import BalanceSheet from './pages/dashboard/BalanceSheet';
+import News from './pages/dashboard/News';
 import { ThemeProvider } from './context/ThemeContext';
+import { AuthProvider, ProtectedRoute } from './context/AuthContext';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App() {
   return (
-    <ThemeProvider>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/login" replace />} />
-            <Route path="register" element={<Register />} />
-            <Route path="confirm" element={<ConfirmSignUp />} />
-            <Route path="login" element={<Login />} />
-            <Route
-              path="onboarding"
-              element={
-                <RequireAuth>
-                  <Onboarding />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="dashboard"
-              element={
-                <RequireAuth>
-                  <Dashboard />
-                </RequireAuth>
-              }
-            />
-          </Route>
-        </Routes>
-      </Router>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <Router>
+            <Routes>
+              {/* Auth & Onboarding Routes */}
+              <Route path="/" element={<Layout />}>
+                <Route index element={<Navigate to="/register" replace />} />
+                <Route path="register" element={<Register />} />
+                <Route path="confirm" element={<ConfirmSignUp />} />
+                <Route path="login" element={<Login />} />
+                <Route path="onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
+                <Route path="onboarding/method" element={<ProtectedRoute><OnboardingMethod /></ProtectedRoute>} />
+                <Route path="onboarding/manual" element={<ProtectedRoute><ManualEntry /></ProtectedRoute>} />
+                <Route path="onboarding/csv" element={<ProtectedRoute><CSVUpload /></ProtectedRoute>} />
+              </Route>
+
+              {/* Dashboard Routes (Protected) */}
+              <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+                <Route path="overview" element={<Overview />} />
+                <Route path="ai-advisory" element={<Advisory />} />
+                <Route path="milestones" element={<Milestones />} />
+                <Route path="balance-sheet" element={<BalanceSheet />} />
+                <Route path="news" element={<News />} />
+                {/* Redirect old dashboard path or index to overview */}
+                <Route path="dashboard" element={<Navigate to="/overview" replace />} />
+              </Route>
+            </Routes>
+          </Router>
+        </AuthProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

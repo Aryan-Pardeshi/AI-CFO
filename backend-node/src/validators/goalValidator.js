@@ -8,9 +8,11 @@ const {
   checkString,
   checkEnum,
   checkPaise,
+  checkDate,
   checkSafeInt,
   checkNumber,
   calcAge,
+  MAX_PAISE_10CR,
   fail,
   sanitized,
 } = require("./common");
@@ -19,7 +21,9 @@ const GOAL_FIELDS = new Set([
   "name",
   "goal_type",
   "amount_today_paise",
+  "current_saved_paise",
   "target_age",
+  "target_date",
   "inflation_rate",
   "priority",
 ]);
@@ -47,7 +51,9 @@ function validateGoal(body, userDobStr, opts = {}) {
   checkString(body.name, "name", errors, details, { max: 200 });
   checkEnum(body.goal_type, "goal_type", errors, details, GOAL_TYPES);
   checkPaise(body.amount_today_paise, "amount_today_paise", errors, details);
+  checkPaise(body.current_saved_paise, "current_saved_paise", errors, details, { max: MAX_PAISE_10CR });
   checkSafeInt(body.target_age, "target_age", errors, details);
+  checkDate(body.target_date, "target_date", errors, details);
   checkNumber(body.inflation_rate, "inflation_rate", errors, details);
   checkSafeInt(body.priority, "priority", errors, details, { nullable: true });
 

@@ -7,8 +7,10 @@ const profileRoutes = require("./routes/profileRoutes");
 const holdingRoutes = require("./routes/holdingRoutes");
 const goalRoutes = require("./routes/goalRoutes");
 const loanRoutes = require("./routes/loanRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
+const portfolioRoutes = require("./routes/portfolioRoutes");
 
-const routes = [...profileRoutes, ...holdingRoutes, ...goalRoutes, ...loanRoutes];
+const routes = [...profileRoutes, ...holdingRoutes, ...goalRoutes, ...loanRoutes, ...dashboardRoutes, ...portfolioRoutes];
 
 async function route(event, userId) {
   tables();

@@ -122,7 +122,7 @@ Resources:
       Architectures:
         - arm64
       MemorySize: 512
-      Timeout: 10
+      Timeout: 20
       Environment:
         Variables:
           USERS_TABLE: !Ref UsersTable
@@ -151,6 +151,42 @@ Resources:
               ApiId: !Ref HttpApi
               Path: /me/profile
               Method: PUT
+        GetDashboardProfile:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /dashboard/profile
+              Method: GET
+        PutDashboardFinancials:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /dashboard/financials
+              Method: PUT
+        GetPortfolioPrices:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /portfolio/prices
+              Method: GET
+        GetPortfolioNews:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /portfolio/news
+              Method: GET
+        GetPortfolioHistorical:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /portfolio/historical
+              Method: GET
+        GetPortfolioSuggestions:
+            Type: HttpApi
+            Properties:
+              ApiId: !Ref HttpApi
+              Path: /portfolio/suggestions
+              Method: GET
         ListHoldings:
             Type: HttpApi
             Properties:
@@ -781,6 +817,13 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Suspended
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: !Ref FrontendOrigins
+            AllowedMethods: [PUT, HEAD]
+            AllowedHeaders: ['*']
+            ExposedHeaders: [ETag]
+            MaxAge: 3000
 
 Outputs:
   HttpApiUrl:

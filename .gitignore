@@ -241,6 +241,7 @@ amplify_outputs.json
 
 # ---- Superpowers skill scratch output ----
 docs/superpowers/
+.worktrees/
 
 # ---- OS ----
 .DS_Store

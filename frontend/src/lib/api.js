@@ -28,7 +28,7 @@ async function accessToken() {
   return token;
 }
 
-async function request(path, { method = 'GET', body } = {}) {
+export async function authenticatedRequest(path, { method = 'GET', body } = {}) {
   const token = await accessToken();
   const res = await fetch(`${baseUrl()}${path}`, {
     method,
@@ -60,61 +60,61 @@ async function request(path, { method = 'GET', body } = {}) {
 }
 
 export function getMe() {
-  return request('/me', { method: 'GET' });
+  return authenticatedRequest('/me', { method: 'GET' });
 }
 
 export function updateProfile(payload) {
-  return request('/me/profile', { method: 'PUT', body: payload });
+  return authenticatedRequest('/me/profile', { method: 'PUT', body: payload });
 }
 
 export function listHoldings() {
-  return request('/holdings', { method: 'GET' });
+  return authenticatedRequest('/holdings', { method: 'GET' });
 }
 
 export function createHolding(payload) {
-  return request('/holdings', { method: 'POST', body: payload });
+  return authenticatedRequest('/holdings', { method: 'POST', body: payload });
 }
 
 export function updateHolding(id, payload) {
-  return request(`/holdings/${id}`, { method: 'PUT', body: payload });
+  return authenticatedRequest(`/holdings/${id}`, { method: 'PUT', body: payload });
 }
 
 export function deleteHolding(id) {
-  return request(`/holdings/${id}`, { method: 'DELETE' });
+  return authenticatedRequest(`/holdings/${id}`, { method: 'DELETE' });
 }
 
 export function listLoans() {
-  return request('/loans', { method: 'GET' });
+  return authenticatedRequest('/loans', { method: 'GET' });
 }
 
 export function createLoan(payload) {
-  return request('/loans', { method: 'POST', body: payload });
+  return authenticatedRequest('/loans', { method: 'POST', body: payload });
 }
 
 export function updateLoan(id, payload) {
-  return request(`/loans/${id}`, { method: 'PUT', body: payload });
+  return authenticatedRequest(`/loans/${id}`, { method: 'PUT', body: payload });
 }
 
 export function deleteLoan(id) {
-  return request(`/loans/${id}`, { method: 'DELETE' });
+  return authenticatedRequest(`/loans/${id}`, { method: 'DELETE' });
 }
 
 export function listGoals() {
-  return request('/goals', { method: 'GET' });
+  return authenticatedRequest('/goals', { method: 'GET' });
 }
 
 export function createGoal(payload) {
-  return request('/goals', { method: 'POST', body: payload });
+  return authenticatedRequest('/goals', { method: 'POST', body: payload });
 }
 
 export function updateGoal(id, payload) {
-  return request(`/goals/${id}`, { method: 'PUT', body: payload });
+  return authenticatedRequest(`/goals/${id}`, { method: 'PUT', body: payload });
 }
 
 export function deleteGoal(id) {
-  return request(`/goals/${id}`, { method: 'DELETE' });
+  return authenticatedRequest(`/goals/${id}`, { method: 'DELETE' });
 }
 
 export function createStatementJob(payload) {
-  return request('/statements', { method: 'POST', body: payload ?? {} });
+  return authenticatedRequest('/statements', { method: 'POST', body: payload ?? {} });
 }

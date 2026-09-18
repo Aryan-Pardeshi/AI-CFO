@@ -4,32 +4,32 @@
     "source": "DEMO",
     "symbol": "RELIANCE",
     "name": "Reliance Industries",
-    "quantity": 30,
-    "avg_buy_price_paise": 1800000
+    "quantity": 200,
+    "avg_buy_price_paise": 115000
   },
   {
     "asset_type": "STOCK",
     "source": "DEMO",
     "symbol": "HDFCBANK",
     "name": "HDFC Bank",
-    "quantity": 20,
-    "avg_buy_price_paise": 1500000
+    "quantity": 40,
+    "avg_buy_price_paise": 70000
   },
   {
     "asset_type": "ETF",
     "source": "DEMO",
     "symbol": "NIFTYBEES",
     "name": "Nippon India ETF Nifty BeES",
-    "quantity": 1000,
-    "avg_buy_price_paise": 26000
+    "quantity": 400,
+    "avg_buy_price_paise": 24500
   },
   {
     "asset_type": "MUTUAL_FUND",
     "source": "DEMO",
     "symbol": "PPFCF",
     "name": "Parag Parikh Flexi Cap Fund",
-    "quantity": 2000,
-    "avg_buy_price_paise": 20000
+    "quantity": 1000,
+    "avg_buy_price_paise": 8000
   },
   {
     "asset_type": "FD",

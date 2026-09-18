@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -28,6 +29,17 @@ from boto3.dynamodb.conditions import Key
 from finance import fire as fire_engine
 from finance import networth as networth_engine
 from finance import portfolio as portfolio_engine
+from statements.categorizer import categorize_rows
+from statements.dto import TransactionDTO
+from statements.errors import (
+    StatementConflictError,
+    StatementNotFoundError,
+    StatementUpstreamError,
+    StatementValidationError,
+)
+from statements.parser import MAX_BYTES, MAX_ROWS, parse_csv
+from statements.summaries import summarize_transactions
+from statements.validator import validate_rows
 from .auth import (
     UnauthorizedError,
     get_authenticated_user_id,
@@ -75,6 +87,12 @@ LIVE_ROUTES = {
     ("GET", "/net-worth/projection"),
 }
 
+TXN_CATEGORIES = {
+    "INCOME", "RENT", "GROCERIES", "FOOD_DELIVERY", "DINING", "TRANSPORT",
+    "SHOPPING", "UTILITIES", "SUBSCRIPTIONS", "EMI", "INVESTMENTS", "TRANSFER",
+    "HEALTH", "EDUCATION", "ENTERTAINMENT", "OTHER",
+}
+
 
 # ---------- response helpers (api-contract.md error envelope) ----------
 
@@ -105,6 +123,14 @@ def _not_found(message: str) -> dict:
     return _err("NOT_FOUND", message, 404)
 
 
+def _conflict(message: str) -> dict:
+    return _err("CONFLICT", message, 409)
+
+
+def _upstream(message: str) -> dict:
+    return _err("UPSTREAM_UNAVAILABLE", message, 502)
+
+
 def _internal(message: str = "Internal error") -> dict:
     return _err("INTERNAL", message, 500)
 
@@ -112,6 +138,7 @@ def _internal(message: str = "Internal error") -> dict:
 # ---------- DynamoDB reads (Query on partition key only, never Scan) ----------
 
 _dynamo = None
+_s3 = None
 
 
 def _dynamodb():
@@ -121,6 +148,30 @@ def _dynamodb():
 
         _dynamo = boto3.resource("dynamodb")
     return _dynamo
+
+
+def _s3_client():
+    global _s3
+    if _s3 is None:
+        import boto3
+
+        _s3 = boto3.client("s3")
+    return _s3
+
+
+def _table(env_var: str):
+    table_name = os.environ.get(env_var)
+    if not table_name:
+        raise RuntimeError(f"Missing env var {env_var}")
+    return _dynamodb().Table(table_name)
+
+
+def _statement_jobs_table():
+    return _table("STATEMENT_JOBS_TABLE")
+
+
+def _transactions_table():
+    return _table("TRANSACTIONS_TABLE")
 
 
 def _query_table(table_env_var: str, user_id: str) -> list[dict]:
@@ -313,7 +364,7 @@ def _fire_goal_inputs(goals: list[dict]) -> list[dict]:
     ]
 
 
-def _parse_body(event: dict) -> dict:
+def _parse_body(event: dict, *, strip_identity: bool = True) -> dict:
     body = event.get("body")
     if body is None or body == "":
         return {}
@@ -326,7 +377,8 @@ def _parse_body(event: dict) -> dict:
             return {"__invalid_json__": True}
     if not isinstance(data, dict):
         return {"__invalid_json__": True}
-    data.pop("user_id", None)  # never trust client-supplied identity
+    if strip_identity:
+        data.pop("user_id", None)  # never trust client-supplied identity
     return data
 
 
@@ -551,6 +603,323 @@ def net_worth_projection_route(data: dict, query: dict) -> dict:
     )
 
 
+def _statement_bucket() -> str:
+    bucket = os.environ.get("DATA_BUCKET")
+    if not bucket:
+        raise RuntimeError("Missing env var DATA_BUCKET")
+    return bucket
+
+
+def _uuid(value: object | None) -> str:
+    if value is None:
+        return str(uuid.uuid4())
+    if not isinstance(value, str):
+        raise StatementValidationError("job_id must be a UUID")
+    try:
+        return str(uuid.UUID(value))
+    except ValueError as exc:
+        raise StatementValidationError("job_id must be a UUID") from exc
+
+
+def _safe_file_name(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise StatementValidationError("file_name is required")
+    if len(value) > 255:
+        raise StatementValidationError("file_name must be at most 255 characters")
+    name = os.path.basename(value.replace("\\", "/"))
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")
+    if not name or not name.lower().endswith(".csv"):
+        raise StatementValidationError("file_name must be a CSV filename")
+    return name[:120]
+
+
+def _user_key_part(user_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", user_id)
+
+
+def _owned_statement_job(user_id: str, job_id: str) -> dict:
+    item = _statement_jobs_table().get_item(
+        Key={"user_id": user_id, "job_id": job_id}
+    ).get("Item")
+    if not item or item.get("user_id") != user_id:
+        raise StatementNotFoundError("statement job not found")
+    return plain_numbers(item)
+
+
+def _save_review_rows(review_key: str, rows: list[dict], summary: dict) -> None:
+    payload = json.dumps({"rows": rows, "summary": summary}, separators=(",", ":")).encode()
+    _s3_client().put_object(
+        Bucket=_statement_bucket(),
+        Key=review_key,
+        Body=payload,
+        ContentType="application/json",
+        ServerSideEncryption="AES256",
+    )
+
+
+def _read_review_rows(review_key: str) -> tuple[list[dict], dict]:
+    try:
+        raw = _s3_client().get_object(Bucket=_statement_bucket(), Key=review_key)["Body"].read()
+    except Exception as exc:
+        raise StatementUpstreamError("review artifact unavailable") from exc
+    payload = json.loads(raw.decode("utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+        raise StatementValidationError("stored review artifact is invalid")
+    return payload["rows"], payload.get("summary") or {}
+
+
+def create_statement_route(user_id: str, body: dict) -> dict:
+    allowed = {"job_id", "file_name", "input_type", "content_type"}
+    supplied_identity = {key for key in ("user_id", "email") if key in body}
+    if supplied_identity:
+        raise StatementValidationError("client identity fields are not accepted")
+    unknown = set(body) - allowed
+    if unknown:
+        raise StatementValidationError("unsupported statement request fields")
+    if body.get("input_type") != "csv":
+        raise StatementValidationError("only input_type=csv is supported in Level 1")
+    if body.get("content_type") != "text/csv":
+        raise StatementValidationError("content_type must be text/csv")
+    job_id = _uuid(body.get("job_id"))
+    file_name = _safe_file_name(body.get("file_name"))
+    user_part = _user_key_part(user_id)
+    s3_key = f"statements/{user_part}/{job_id}/{file_name}"
+    review_key = f"statements/{user_part}/{job_id}/review.json"
+    now = datetime.now(timezone.utc).isoformat()
+    job = {
+        "user_id": user_id,
+        "job_id": job_id,
+        "file_name": file_name,
+        "input_type": "csv",
+        "content_type": "text/csv",
+        "s3_key": s3_key,
+        "review_s3_key": review_key,
+        "status": "PENDING_UPLOAD",
+        "created_at": now,
+        "updated_at": now,
+    }
+    try:
+        _statement_jobs_table().put_item(Item=job, ConditionExpression="attribute_not_exists(job_id)")
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            raise StatementConflictError("statement job already exists") from exc
+        raise
+    url = _s3_client().generate_presigned_url(
+        "put_object",
+        Params={"Bucket": _statement_bucket(), "Key": s3_key, "ContentType": "text/csv"},
+        ExpiresIn=900,
+    )
+    return _ok({
+        "job_id": job_id,
+        "status": "PENDING_UPLOAD",
+        "file_name": file_name,
+        "upload": {"url": url, "key": s3_key, "expires_in": 900},
+    }, 201)
+
+
+def _download_csv(job: dict) -> bytes:
+    try:
+        response = _s3_client().get_object(Bucket=_statement_bucket(), Key=job["s3_key"])
+        if response.get("ContentLength") is not None and int(response["ContentLength"]) > MAX_BYTES:
+            raise StatementValidationError("uploaded CSV exceeds the 1 MiB limit")
+        content = response["Body"].read(MAX_BYTES + 1)
+    except StatementValidationError:
+        raise
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") in {"NoSuchKey", "404"}:
+            raise StatementValidationError("no uploaded CSV found for this job; upload the file first") from exc
+        raise StatementUpstreamError("uploaded statement is unavailable") from exc
+    if len(content) > MAX_BYTES:
+        raise StatementValidationError("uploaded CSV exceeds the 1 MiB limit")
+    return content
+
+
+def process_statement_route(user_id: str, job_id: str) -> dict:
+    job = _owned_statement_job(user_id, job_id)
+    if job.get("status") == "COMMITTED":
+        raise StatementConflictError("statement job is already committed")
+    parsed = parse_csv(_download_csv(job))
+    validated, validation_summary = validate_rows(parsed)
+    categorized = categorize_rows(validated)
+    rows = [row.to_dict() for row in categorized]
+    _save_review_rows(job["review_s3_key"], rows, validation_summary)
+    now = datetime.now(timezone.utc).isoformat()
+    _statement_jobs_table().put_item(Item={
+        **job,
+        "status": "REVIEW_REQUIRED",
+        "validation_summary": validation_summary,
+        "reconciliation_summary": {
+            "reconciled": validation_summary["reconciled"],
+            "balance_delta_paise": validation_summary["balance_delta_paise"],
+        },
+        "updated_at": now,
+    })
+    return _ok({
+        "job_id": job_id,
+        "status": "REVIEW_REQUIRED",
+        "validation_summary": validation_summary,
+        "reconciliation_summary": {
+            "reconciled": validation_summary["reconciled"],
+            "balance_delta_paise": validation_summary["balance_delta_paise"],
+        },
+    }, 202)
+
+
+def get_statement_route(user_id: str, job_id: str) -> dict:
+    job = _owned_statement_job(user_id, job_id)
+    rows: list[dict] = []
+    summary = job.get("validation_summary") or {
+        "row_count": 0,
+        "credit_total_paise": 0,
+        "debit_total_paise": 0,
+        "net_paise": 0,
+        "reconciled": False,
+        "balance_delta_paise": 0,
+    }
+    if job.get("status") in {"REVIEW_REQUIRED", "COMMITTED"}:
+        rows, stored_summary = _read_review_rows(job["review_s3_key"])
+        summary = stored_summary or summary
+    return _ok({
+        "job_id": job_id,
+        "file_name": job.get("file_name"),
+        "status": job.get("status"),
+        "validation_summary": summary,
+        "reconciliation_summary": job.get("reconciliation_summary") or {
+            "reconciled": summary.get("reconciled", False),
+            "balance_delta_paise": summary.get("balance_delta_paise", 0),
+        },
+        "review_rows": rows,
+    })
+
+
+def _review_transactions(rows: object) -> list[TransactionDTO]:
+    if not isinstance(rows, list) or not rows or len(rows) > MAX_ROWS:
+        raise StatementValidationError("reviewed_rows must contain 1 to 1000 rows")
+    normalized: list[dict] = []
+    ids: set[str] = set()
+    for index, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            raise StatementValidationError(f"review row {index} must be an object")
+        txn_id = row.get("txn_id") or f"row-{index}"
+        if not isinstance(txn_id, str) or not txn_id or len(txn_id) > 120 or txn_id in ids:
+            raise StatementValidationError("review rows must have unique txn_id values")
+        ids.add(txn_id)
+        normalized.append({
+            "txn_id": txn_id,
+            "txn_date": row.get("txn_date"),
+            "description": row.get("description"),
+            "amount_paise": row.get("amount_paise"),
+            "direction": str(row.get("direction") or "").upper(),
+            "balance_paise": row.get("balance_paise"),
+        })
+    validated, _ = validate_rows(normalized)
+    output: list[TransactionDTO] = []
+    for original, row in zip(rows, validated):
+        category = str(original.get("category") or "").upper()
+        if category and category not in TXN_CATEGORIES:
+            raise StatementValidationError("review row category is invalid")
+        source = str(original.get("category_source") or ("user" if category else "rule")).lower()
+        if source not in {"rule", "user"}:
+            raise StatementValidationError("review row category_source is invalid")
+        output.append(TransactionDTO(
+            txn_id=str(original.get("txn_id") or row.txn_id),
+            txn_date=row.txn_date,
+            description=row.description,
+            amount_paise=row.amount_paise,
+            direction=row.direction,
+            category=category or None,
+            category_source=source,
+            balance_paise=row.balance_paise,
+        ))
+    categorized = categorize_rows(output)
+    return [
+        TransactionDTO(
+            txn_id=row.txn_id,
+            txn_date=row.txn_date,
+            description=row.description,
+            amount_paise=row.amount_paise,
+            direction=row.direction,
+            category=original.category or row.category,
+            category_source=original.category_source or row.category_source,
+            balance_paise=row.balance_paise,
+        )
+        for original, row in zip(output, categorized)
+    ]
+
+
+def commit_statement_route(user_id: str, job_id: str, body: dict) -> dict:
+    job = _owned_statement_job(user_id, job_id)
+    if job.get("status") == "COMMITTED":
+        return _ok({
+            "job_id": job_id,
+            "status": "COMMITTED",
+            "summary": job.get("commit_summary") or {},
+            "committed_row_count": int(job.get("committed_row_count") or 0),
+        })
+    if job.get("status") != "REVIEW_REQUIRED":
+        raise StatementConflictError("statement job is not ready for commit")
+    if isinstance(body.get("reviewed_rows"), list):
+        reviewed = body["reviewed_rows"]
+    elif body.get("confirm_stored_rows") is True:
+        reviewed, _ = _read_review_rows(job["review_s3_key"])
+    else:
+        raise StatementValidationError("explicit reviewed_rows or confirm_stored_rows=true is required")
+    transactions = _review_transactions(reviewed)
+    summary = summarize_transactions(transactions)
+    table = _transactions_table()
+    for row in transactions:
+        try:
+            table.put_item(Item={
+                "user_id": user_id,
+                "txn_sk": f"{row.txn_date}#{row.txn_id}",
+                "txn_id": row.txn_id,
+                "txn_date": row.txn_date,
+                "description": row.description,
+                "amount_paise": row.amount_paise,
+                "direction": row.direction,
+                "category": row.category,
+                "category_source": row.category_source,
+                "balance_paise": row.balance_paise,
+                "source_job_id": job_id,
+            }, ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(txn_sk)")
+        except Exception as exc:
+            error_code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+            if error_code != "ConditionalCheckFailedException":
+                raise
+    now = datetime.now(timezone.utc).isoformat()
+    _save_review_rows(job["review_s3_key"], [row.to_dict() for row in transactions], summary)
+    _statement_jobs_table().put_item(Item={
+        **job,
+        "status": "COMMITTED",
+        "commit_summary": summary,
+        "committed_row_count": len(transactions),
+        "updated_at": now,
+    })
+    return _ok({
+        "job_id": job_id,
+        "status": "COMMITTED",
+        "summary": summary,
+        "committed_row_count": len(transactions),
+    })
+
+
+def cashflow_summary_route(user_id: str) -> dict:
+    raw_rows = plain_numbers(_query_table("TRANSACTIONS_TABLE", user_id))
+    rows = [TransactionDTO(
+        txn_id=str(row.get("txn_id") or row.get("txn_sk", "").split("#", 1)[-1]),
+        txn_date=str(row["txn_date"]),
+        description=str(row.get("description") or ""),
+        amount_paise=int(row["amount_paise"]),
+        direction=str(row["direction"]),
+        category=row.get("category"),
+        category_source=row.get("category_source"),
+        balance_paise=(int(row["balance_paise"]) if row.get("balance_paise") is not None else None),
+    ) for row in raw_rows]
+    summary = summarize_transactions(rows)
+    balances = [row.balance_paise for row in rows if row.balance_paise is not None]
+    return _ok({**summary, "current_balance_paise": balances[-1] if balances else None})
+
+
 # ---------- router ----------
 
 def _method_and_path(event: dict) -> tuple[str, str]:
@@ -584,14 +953,32 @@ def handler(event: dict, context) -> dict:
             ),
         }
 
-    if (method, path) not in LIVE_ROUTES:
+    statements_live = (
+        method == "POST" and path == "/statements"
+    ) or re.fullmatch(r"(?:POST|GET) /statements/[^/]+(?:/process|/commit)?", f"{method} {path}")
+    cashflow_live = method == "GET" and path == "/cashflow/summary"
+    if (method, path) not in LIVE_ROUTES and not statements_live and not cashflow_live:
         return not_implemented_response(route_label)
 
     try:
-        body = _parse_body(event)
+        is_create_statement = method == "POST" and path == "/statements"
+        body = _parse_body(event, strip_identity=not is_create_statement)
         if "__invalid_json__" in body:
             return _validation("Request body must be a JSON object")
         query = event.get("queryStringParameters") or {}
+        if is_create_statement:
+            return create_statement_route(user_id, body)
+        process_match = re.fullmatch(r"/statements/([^/]+)/process", path)
+        if method == "POST" and process_match:
+            return process_statement_route(user_id, process_match.group(1))
+        statement_match = re.fullmatch(r"/statements/([^/]+)", path)
+        if method == "GET" and statement_match:
+            return get_statement_route(user_id, statement_match.group(1))
+        commit_match = re.fullmatch(r"/statements/([^/]+)/commit", path)
+        if method == "POST" and commit_match:
+            return commit_statement_route(user_id, commit_match.group(1), body)
+        if method == "GET" and path == "/cashflow/summary":
+            return cashflow_summary_route(user_id)
         data = load_user_data(user_id)
         if (method, path) == ("GET", "/portfolio/analysis"):
             return portfolio_analysis_route(data)
@@ -605,6 +992,14 @@ def handler(event: dict, context) -> dict:
             return net_worth_projection_route(data, query)
     except UnauthorizedError:
         return unauthorized_response()
+    except StatementValidationError as exc:
+        return _validation(str(exc))
+    except StatementNotFoundError:
+        return _not_found("Statement job not found")
+    except StatementConflictError as exc:
+        return _conflict(str(exc))
+    except StatementUpstreamError as exc:
+        return _upstream(str(exc))
     except Exception:
         logger.exception("Unhandled error on %s", route_label)
         return _internal()
