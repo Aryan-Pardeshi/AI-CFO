@@ -71,3 +71,17 @@ h1, h2, h3, h4, h5, h6 {
 .btn-outline:hover {
   background: var(--surface-color);
 }
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

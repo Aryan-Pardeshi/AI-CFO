@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import { useAuth } from '../context/AuthContext';
 
 const Register = () => {
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleGoogleSuccess = async (tokenResponse) => {
     try {
@@ -26,8 +28,9 @@ const Register = () => {
       });
 
       if (response.ok) {
-        localStorage.setItem('userEmail', userInfo.email);
-        navigate('/onboarding');
+        const data = await response.json();
+        login(userInfo.email);
+        navigate(data.hasOnboarded ? '/overview' : '/onboarding');
       } else {
         const data = await response.json();
         setError(data.error || 'Google registration failed');
@@ -62,7 +65,7 @@ const Register = () => {
       if (!response.ok) {
         setError(data.error || 'Registration failed');
       } else {
-        localStorage.setItem('userEmail', email);
+        login(email);
         navigate('/onboarding'); 
       }
     } catch (err) {

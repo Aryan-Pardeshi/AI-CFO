@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const [error, setError] = useState('');
   const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleGoogleSuccess = async (tokenResponse) => {
     try {
@@ -27,8 +29,8 @@ const Login = () => {
 
       if (response.ok) {
         const data = await response.json();
-        localStorage.setItem('userEmail', userInfo.email);
-        navigate(data.hasOnboarded ? '/dashboard' : '/onboarding');
+        login(userInfo.email);
+        navigate(data.hasOnboarded ? '/overview' : '/onboarding');
       } else {
         const data = await response.json();
         setError(data.error || 'Google login failed');
@@ -62,8 +64,8 @@ const Login = () => {
       if (!response.ok) {
         setError(data.error || 'Login failed');
       } else {
-        localStorage.setItem('userEmail', email);
-        navigate(data.hasOnboarded ? '/dashboard' : '/onboarding');
+        login(email);
+        navigate(data.hasOnboarded ? '/overview' : '/onboarding');
       }
     } catch (err) {
       setError('Network error. Please try again.');
