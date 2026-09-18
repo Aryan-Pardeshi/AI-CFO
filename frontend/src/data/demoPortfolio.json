@@ -1,0 +1,43 @@
+[
+  {
+    "asset_type": "STOCK",
+    "source": "DEMO",
+    "symbol": "RELIANCE",
+    "name": "Reliance Industries",
+    "quantity": 30,
+    "avg_buy_price_paise": 1800000
+  },
+  {
+    "asset_type": "STOCK",
+    "source": "DEMO",
+    "symbol": "HDFCBANK",
+    "name": "HDFC Bank",
+    "quantity": 20,
+    "avg_buy_price_paise": 1500000
+  },
+  {
+    "asset_type": "ETF",
+    "source": "DEMO",
+    "symbol": "NIFTYBEES",
+    "name": "Nippon India ETF Nifty BeES",
+    "quantity": 1000,
+    "avg_buy_price_paise": 26000
+  },
+  {
+    "asset_type": "MUTUAL_FUND",
+    "source": "DEMO",
+    "symbol": "PPFCF",
+    "name": "Parag Parikh Flexi Cap Fund",
+    "quantity": 2000,
+    "avg_buy_price_paise": 20000
+  },
+  {
+    "asset_type": "FD",
+    "source": "DEMO",
+    "name": "Demo Fixed Deposit",
+    "fd_type": "CUMULATIVE",
+    "fd_principal_paise": 30000000,
+    "fd_annual_rate": 0.07,
+    "fd_start_date": "2026-01-15"
+  }
+]

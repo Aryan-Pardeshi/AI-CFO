@@ -19,8 +19,8 @@ const {
 } = require("@aws-sdk/lib-dynamodb");
 
 const db = require("../src/db");
-const { route } = require("../src/routes");
-const { calcAge } = require("../src/validate");
+const { route } = require("../src/router");
+const { calcAge } = require("../src/validators/common");
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 db._setDocClient(ddbMock);

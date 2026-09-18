@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from decimal import Decimal
 
 import pytest
 
@@ -174,3 +175,83 @@ def test_dynamo_failure_returns_500(monkeypatch):
     res = fin.handler(_event("GET", "/portfolio/analysis"), None)
     assert res["statusCode"] == 500
     assert json.loads(res["body"])["error"]["code"] == "INTERNAL"
+
+
+# DynamoDB hands every number back as decimal.Decimal, so the fixtures above
+# (plain ints) never exercised the types the routes actually receive.
+
+DECIMAL_DATA = {
+    "user": {
+        "user_id": "user-123",
+        "name": "Demo",
+        "date_of_birth": "1996-05-01",
+        "monthly_expenses_paise": Decimal("5000000"),
+        "monthly_investment_paise": Decimal("5000000"),
+        "cash_balance_paise": Decimal("30000000"),
+        "emergency_fund_target_months": Decimal("6"),
+    },
+    "holdings": [
+        {
+            "holding_id": "h1",
+            "asset_type": "STOCK",
+            "symbol": "RELIANCE",
+            "name": "Reliance Industries",
+            "quantity": Decimal("30"),
+            "avg_buy_price_paise": Decimal("1800000"),
+        },
+        {
+            "holding_id": "h2",
+            "asset_type": "MUTUAL_FUND",
+            "symbol": "PPFCF",
+            "name": "Parag Parikh Flexi Cap",
+            "quantity": Decimal("12.5"),
+            "avg_buy_price_paise": Decimal("20000"),
+        },
+        {
+            "holding_id": "h3",
+            "asset_type": "FD",
+            "name": "Demo Fixed Deposit",
+            "fd_type": "CUMULATIVE",
+            "fd_principal_paise": Decimal("30000000"),
+            "fd_annual_rate": Decimal("0.07"),
+            "fd_start_date": "2026-01-15",
+        },
+    ],
+    "goals": [],
+    "loans": [],
+}
+
+
+@pytest.fixture
+def decimal_demo(monkeypatch):
+    monkeypatch.setattr(fin, "load_user_data",
+                        lambda user_id: fin.plain_numbers(DECIMAL_DATA))
+    return DECIMAL_DATA
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/portfolio/analysis", None),
+    ("POST", "/fire/calculate", {}),
+    ("GET", "/net-worth", None),
+    ("GET", "/net-worth/projection", None),
+])
+def test_routes_survive_dynamodb_decimals(decimal_demo, method, path, body):
+    res = fin.handler(_event(method, path, body=body), None)
+    assert res["statusCode"] == 200, res["body"]
+
+
+def test_plain_numbers_preserves_int_and_float():
+    out = fin.plain_numbers({
+        "paise": Decimal("30000000"),
+        "fractional_qty": Decimal("12.5"),
+        "rate": Decimal("0.07"),
+        "nested": [{"q": Decimal("30")}],
+        "text": "2026-01-15",
+        "none": None,
+    })
+    assert out["paise"] == 30000000 and isinstance(out["paise"], int)
+    assert out["fractional_qty"] == 12.5 and isinstance(out["fractional_qty"], float)
+    assert isinstance(out["rate"], float)
+    assert isinstance(out["nested"][0]["q"], int)
+    assert out["text"] == "2026-01-15"
+    assert out["none"] is None

@@ -8,7 +8,7 @@ Expected files (see `.agents/modules.md#module-calculators-seed` and
 
 - `demo-portfolio.json` — the onboarding "load demo portfolio" dataset. Needs a mix of
   STOCK/ETF/MUTUAL_FUND/FD and at least one holding >25% weight (demo needs to show the
-  concentration flag).
+  concentration flag). NOTE: must stay in sync with `frontend/src/data/demoPortfolio.json` (deliberate duplicate — Vite can't reliably serve files outside its project root).
 - `fundamentals.json` — 15-20 demo securities with P/E, ROE, sector, sector-reference P/E,
   debt metric. Record `source` and `as_of` on every entry — never let the model fill a gap.
 - `glossary.json` — curated term definitions backing `explain_financial_term`.

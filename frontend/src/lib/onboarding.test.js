@@ -4,15 +4,54 @@ import {
   buildGoalPayload,
   buildHoldingPayload,
   buildLoanPayload,
+  ageFromDob,
   fdHoldingSync,
   fractionToPercent,
   goalDefaultName,
   goalRowSync,
   holdingRowSync,
   loanRowSync,
+  mapHoldingRows,
   paiseToRupees,
   percentToFraction,
+  deserializeStep3Draft,
+  serializeStep3Draft,
+  parseRupeesField,
 } from './onboarding.js';
+
+describe('ageFromDob', () => {
+  test('null input -> null', () => {
+    expect(ageFromDob(null)).toBeNull();
+  });
+
+  test('normal date returns the current age', () => {
+    const now = new Date();
+    const dob = new Date(now.getFullYear() - 30, now.getMonth(), now.getDate());
+    expect(ageFromDob(`${dob.getFullYear()}-${String(dob.getMonth() + 1).padStart(2, '0')}-${String(dob.getDate()).padStart(2, '0')}`)).toBe(30);
+  });
+});
+
+describe('parseRupeesField', () => {
+  test('blank required value returns an error', () => {
+    expect(parseRupeesField('Amount', '')).toEqual({ error: 'Amount is required' });
+  });
+
+  test('blank optional value returns empty', () => {
+    expect(parseRupeesField('Amount', '', { required: false })).toEqual({ paise: 0, empty: true });
+  });
+
+  test('invalid input returns an error', () => {
+    expect(parseRupeesField('Amount', 'not-a-number')).toEqual({ error: 'Amount must be a valid amount with up to 2 decimals' });
+  });
+
+  test('value over the 10 crore cap returns an error', () => {
+    expect(parseRupeesField('Amount', '100000001')).toEqual({ error: 'Amount must be between ₹0 and ₹10 crore' });
+  });
+
+  test('valid value returns paise', () => {
+    expect(parseRupeesField('Amount', '1500.25')).toEqual({ paise: 150025 });
+  });
+});
 
 describe('goalDefaultName', () => {
   test('HOUSE_DOWN_PAYMENT -> "House down payment"', () => {
@@ -53,6 +92,79 @@ describe('paiseToRupees', () => {
   test('null/undefined -> empty string', () => {
     expect(paiseToRupees(null)).toBe('');
     expect(paiseToRupees(undefined)).toBe('');
+  });
+});
+
+describe('mapHoldingRows', () => {
+  test('maps the FD and non-FD holdings into step-4 form rows', () => {
+    expect(mapHoldingRows([
+      {
+        asset_type: 'FD',
+        fd_principal_paise: 30000000,
+        holding_id: 'fd-1',
+      },
+      {
+        asset_type: 'STOCK',
+        symbol: 'RELIANCE',
+        name: 'Reliance Industries',
+        quantity: 30,
+        avg_buy_price_paise: 1800000,
+        holding_id: 'holding-1',
+      },
+    ])).toEqual({
+      fdAmount: '300000',
+      fdServerId: 'fd-1',
+      holdings: [{
+        id: 'srv-holding-1',
+        server_id: 'holding-1',
+        asset_type: 'STOCK',
+        symbol: 'RELIANCE',
+        name: 'Reliance Industries',
+        quantity: '30',
+        buyPrice: '18000',
+        valueOnly: false,
+        currentValue: '',
+      }],
+    });
+  });
+
+  test('restores a manual current value as a value-only row', () => {
+    expect(mapHoldingRows([{
+      asset_type: 'OTHER',
+      symbol: 'OLD-FUND',
+      name: 'Inherited fund',
+      quantity: 1,
+      avg_buy_price_paise: 275000,
+      manual_current_value_paise: 275000,
+      holding_id: 'holding-2',
+    }]).holdings).toEqual([{
+      id: 'srv-holding-2',
+      server_id: 'holding-2',
+      asset_type: 'OTHER',
+      symbol: 'OLD-FUND',
+      name: 'Inherited fund',
+      quantity: '1',
+      buyPrice: '2750',
+      valueOnly: true,
+      currentValue: '2750',
+    }]);
+  });
+});
+
+describe('step 3 draft serialization', () => {
+  const draft = {
+    incomes: { job: '80000', business: '', rental: '12000', dividend: '', freelance: '' },
+    expenses: { rent: '20000', food: '10000', transportation: '', utilities: '', insurance: '', subscriptions: '', shopping: '', healthcare: '', education: '', entertainment: '', miscellaneous: '' },
+    cashParts: { current: '45000', savings: '200000', cash: '15000' },
+  };
+
+  test('round-trips the itemized step 3 fields', () => {
+    expect(deserializeStep3Draft(serializeStep3Draft(draft))).toEqual(draft);
+  });
+
+  test('rejects malformed or incomplete drafts', () => {
+    expect(deserializeStep3Draft('not json')).toBeNull();
+    expect(deserializeStep3Draft(JSON.stringify({ incomes: draft.incomes }))).toBeNull();
   });
 });
 
@@ -115,9 +227,30 @@ describe('payload builders carry backend-required fields', () => {
     expect(p.asset_type).toBe('STOCK');
     expect(p.name).toBe('Reliance');
     expect(p.quantity).toBe(10);
+    expect(p.avg_buy_price_paise).toBe(150025);
+  });
+  test('value-only holding payload sets quantity, cost basis, and manual value', () => {
+    const p = buildHoldingPayload({
+      assetType: 'OTHER',
+      symbol: 'OLD-FUND',
+      name: 'Inherited fund',
+      quantity: 1,
+      avgBuyPricePaise: 275000,
+      manualCurrentValuePaise: 275000,
+    });
+    expect(p).toMatchObject({
+      quantity: 1,
+      avg_buy_price_paise: 275000,
+      manual_current_value_paise: 275000,
+    });
   });
   test('FD payload has fd_principal_paise', () => {
     expect(buildFdPayload(50000000).fd_principal_paise).toBe(50000000);
+  });
+  test('holding and FD payloads leave source to the server so an update never relabels a DEMO row', () => {
+    const holding = buildHoldingPayload({ assetType: 'STOCK', symbol: 'RELIANCE', name: 'Reliance', quantity: 30, avgBuyPricePaise: 1800000 });
+    expect(holding).not.toHaveProperty('source');
+    expect(buildFdPayload(30000000)).not.toHaveProperty('source');
   });
   test('goal payload has name, goal_type, amount_today_paise, target_age', () => {
     const p = buildGoalPayload({ name: 'House down payment', goalType: 'HOUSE_DOWN_PAYMENT', amountPaise: 500000000, targetAge: 60, inflationRate: 0.06 });

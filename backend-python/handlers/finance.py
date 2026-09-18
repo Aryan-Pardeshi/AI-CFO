@@ -17,9 +17,11 @@ from env vars; pure math lives in finance/* (no boto3 there).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from boto3.dynamodb.conditions import Key
 
@@ -35,6 +37,9 @@ from .auth import (
 
 # (method, path-regex) — path regexes anchored. Instrument keys stay in
 # query string per api-contract.md, never path params.
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 ROUTES: list[tuple[str, str]] = [
     ("GET", r"/portfolio/analysis"),
     ("GET", r"/securities/search"),
@@ -146,14 +151,27 @@ def _get_user(user_id: str) -> dict | None:
     return row
 
 
+def plain_numbers(value):
+    """DynamoDB returns every number as Decimal, which raises TypeError the
+    moment finance/* mixes it with a float. Convert at this boundary so the
+    pure modules only ever see int/float."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, list):
+        return [plain_numbers(v) for v in value]
+    if isinstance(value, dict):
+        return {k: plain_numbers(v) for k, v in value.items()}
+    return value
+
+
 def load_user_data(user_id: str) -> dict:
     """All DynamoDB reads for the finance routes, keyed by Cognito sub."""
-    return {
+    return plain_numbers({
         "user": _get_user(user_id),
         "holdings": _query_table("HOLDINGS_TABLE", user_id),
         "goals": _query_table("GOALS_TABLE", user_id),
         "loans": _query_table("LOANS_TABLE", user_id),
-    }
+    })
 
 
 # ---------- Level-1 price shim (delete when Upstox lands) ----------
@@ -588,6 +606,7 @@ def handler(event: dict, context) -> dict:
     except UnauthorizedError:
         return unauthorized_response()
     except Exception:
+        logger.exception("Unhandled error on %s", route_label)
         return _internal()
     return not_implemented_response(route_label)
 

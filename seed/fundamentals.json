@@ -1,0 +1,34 @@
+[
+  {
+    "symbol": "RELIANCE",
+    "name": "Reliance Industries",
+    "sector": "ENERGY",
+    "asset_type": "STOCK",
+    "source": "seed",
+    "as_of": "2026-09-18"
+  },
+  {
+    "symbol": "HDFCBANK",
+    "name": "HDFC Bank",
+    "sector": "FINANCIAL_SERVICES",
+    "asset_type": "STOCK",
+    "source": "seed",
+    "as_of": "2026-09-18"
+  },
+  {
+    "symbol": "NIFTYBEES",
+    "name": "Nippon India ETF Nifty BeES",
+    "sector": "INDEX",
+    "asset_type": "ETF",
+    "source": "seed",
+    "as_of": "2026-09-18"
+  },
+  {
+    "symbol": "PPFCF",
+    "name": "Parag Parikh Flexi Cap Fund",
+    "sector": "DIVERSIFIED",
+    "asset_type": "MUTUAL_FUND",
+    "source": "seed",
+    "as_of": "2026-09-18"
+  }
+]

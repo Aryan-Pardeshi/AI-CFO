@@ -7,13 +7,11 @@ const {
   MAX_PAISE_10CR,
   calcAge,
   parseBody,
-  validateProfile,
-  validateHolding,
-  validateGoal,
-  applyGoalDefaults,
-  validateLoan,
-  applyLoanDefaults,
-} = require("../src/validate");
+} = require("../src/validators/common");
+const { validateProfile } = require("../src/validators/profileValidator");
+const { validateHolding } = require("../src/validators/holdingValidator");
+const { validateGoal, applyGoalDefaults } = require("../src/validators/goalValidator");
+const { validateLoan, applyLoanDefaults } = require("../src/validators/loanValidator");
 
 function dobForAge(age) {
   const now = new Date();

@@ -6,7 +6,7 @@
  * Auth: Cognito sub from JWT authorizer claims. Validation + routes in src/.
  */
 
-const { route } = require("./src/routes");
+const { route } = require("./src/router");
 
 function getAuthenticatedUserId(event) {
   const sub =
@@ -23,13 +23,7 @@ function getAuthenticatedUserId(event) {
   return sub;
 }
 
-function json(statusCode, obj) {
-  return {
-    statusCode,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(obj),
-  };
-}
+const { json } = require("./src/utils/response");
 
 async function handler(event, _context) {
   let userId;

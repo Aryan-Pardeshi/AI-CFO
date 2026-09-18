@@ -1,5 +1,42 @@
+import { rupeesToPaise } from './money.js';
+
 // Pure helpers for the onboarding flow: row -> payload mapping and
 // create-vs-update-vs-skip decisions. No React, no network — unit tested.
+
+export const MAX_PAISE = 10000000000;
+
+export function ageFromDob(dob) {
+  if (!dob) return null;
+  const d = new Date(`${dob}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+  return age;
+}
+
+export function parseRupeesField(label, value, { required = true, maxPaise = MAX_PAISE } = {}) {
+  const trimmed = String(value ?? '').trim();
+  if (trimmed === '') {
+    if (!required) return { paise: 0, empty: true };
+    return { error: `${label} is required` };
+  }
+  let paise;
+  try {
+    paise = rupeesToPaise(trimmed);
+  } catch {
+    return { error: `${label} must be a valid amount with up to 2 decimals` };
+  }
+  if (paise < 0 || paise > maxPaise) {
+    return { error: `${label} must be between ₹0 and ₹10 crore` };
+  }
+  return { paise };
+}
+
+export function serverIdOf(created, fallback) {
+  return created?.holding_id ?? created?.loan_id ?? created?.goal_id ?? created?.id ?? fallback;
+}
 
 export const GOAL_TYPE_LABELS = {
   CAR: 'Car',
@@ -45,6 +82,41 @@ export const ASSET_TYPE_LABELS = {
   OTHER: 'Other',
 };
 
+export const STEP3_DRAFT_KEY = 'aicfo-onboarding-step3-draft-v1';
+
+const STEP3_INCOME_FIELDS = ['job', 'business', 'rental', 'dividend', 'freelance'];
+const STEP3_EXPENSE_FIELDS = ['rent', 'food', 'transportation', 'utilities', 'insurance', 'subscriptions', 'shopping', 'healthcare', 'education', 'entertainment', 'miscellaneous'];
+const STEP3_CASH_FIELDS = ['current', 'savings', 'cash'];
+
+function normalizeStep3DraftSection(value, fields) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const normalized = {};
+  for (const field of fields) {
+    if (typeof value[field] !== 'string') return null;
+    normalized[field] = value[field];
+  }
+  return normalized;
+}
+
+export function serializeStep3Draft({ incomes, expenses, cashParts }) {
+  return JSON.stringify({ incomes, expenses, cashParts });
+}
+
+export function deserializeStep3Draft(raw) {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const incomes = normalizeStep3DraftSection(parsed?.incomes, STEP3_INCOME_FIELDS);
+  const expenses = normalizeStep3DraftSection(parsed?.expenses, STEP3_EXPENSE_FIELDS);
+  const cashParts = normalizeStep3DraftSection(parsed?.cashParts, STEP3_CASH_FIELDS);
+  if (!incomes || !expenses || !cashParts) return null;
+  return { incomes, expenses, cashParts };
+}
+
 // Percent shown in inputs <-> decimal fraction sent to API.
 // percentToFraction(8.5) -> 0.085 ; fractionToPercent(0.1) -> 10
 export function percentToFraction(percent) {
@@ -72,6 +144,29 @@ export function paiseToRupees(paise) {
   return String(n / 100);
 }
 
+export function mapHoldingRows(items) {
+  const fd = items.find((h) => h.asset_type === 'FD');
+  const rest = items.filter((h) => h.asset_type !== 'FD');
+  return {
+    fdAmount: fd ? paiseToRupees(fd.fd_principal_paise) : null,
+    fdServerId: fd ? fd.holding_id ?? null : null,
+    holdings: rest.length > 0 ? rest.map((h) => {
+      const valueOnly = h.manual_current_value_paise !== null && h.manual_current_value_paise !== undefined;
+      return {
+        id: `srv-${h.holding_id}`,
+        server_id: h.holding_id,
+        asset_type: h.asset_type,
+        symbol: h.symbol ?? '',
+        name: h.name ?? '',
+        quantity: h.quantity === null || h.quantity === undefined ? '' : String(h.quantity),
+        buyPrice: paiseToRupees(h.avg_buy_price_paise),
+        valueOnly,
+        currentValue: valueOnly ? paiseToRupees(h.manual_current_value_paise) : '',
+      };
+    }) : null,
+  };
+}
+
 export function isBlankString(value) {
   return String(value ?? '').trim() === '';
 }
@@ -79,10 +174,12 @@ export function isBlankString(value) {
 // A row the user never touched carries no data — safe to skip on submit.
 export function holdingRowSync(row) {
   const untouched =
+    !row.valueOnly &&
     isBlankString(row.symbol) &&
     isBlankString(row.name) &&
     isBlankString(row.quantity) &&
-    isBlankString(row.buyPrice);
+    isBlankString(row.buyPrice) &&
+    isBlankString(row.currentValue);
   if (untouched) return 'skip';
   return row.server_id ? 'update' : 'create';
 }
@@ -112,15 +209,16 @@ export function fdHoldingSync({ serverId, paise }) {
   return serverId ? 'delete' : 'skip';
 }
 
-export function buildHoldingPayload({ assetType, symbol, name, quantity, avgBuyPricePaise }) {
-  return {
+export function buildHoldingPayload({ assetType, symbol, name, quantity, avgBuyPricePaise, manualCurrentValuePaise }) {
+  const payload = {
     asset_type: assetType,
-    source: 'MANUAL',
     symbol,
     name,
     quantity,
     avg_buy_price_paise: avgBuyPricePaise,
   };
+  if (manualCurrentValuePaise !== undefined) payload.manual_current_value_paise = manualCurrentValuePaise;
+  return payload;
 }
 
 export function buildLoanPayload({ loanType, name, principalPaise, outstandingPaise, annualRate, tenureMonths, startDate, rateType }) {
@@ -149,7 +247,6 @@ export function buildGoalPayload({ name, goalType, amountPaise, targetAge, infla
 export function buildFdPayload(paise) {
   return {
     asset_type: 'FD',
-    source: 'MANUAL',
     name: 'Fixed deposit',
     fd_principal_paise: paise,
   };
