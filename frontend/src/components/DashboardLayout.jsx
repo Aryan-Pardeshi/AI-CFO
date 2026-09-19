@@ -43,11 +43,12 @@ const DashboardLayout = () => {
       }}>
         {/* Logo / Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ width: '32px', height: '32px', backgroundColor: 'var(--accent-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
-            A
-          </div>
+          <img
+            src="/aria-logo.png"
+            alt="ARIA"
+            style={{ width: '56px', height: '56px', objectFit: 'contain', flexShrink: 0 }}
+          />
           <div>
-            <h1 style={{ fontSize: '1.1rem', margin: 0, lineHeight: 1 }}>ARIA</h1>
             <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>AI CFO Intelligence</span>
           </div>
         </div>
