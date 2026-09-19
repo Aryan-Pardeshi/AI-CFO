@@ -505,7 +505,9 @@ Resources:
           # live chat model path. See agent-guide.md#kilo-ai-gateway.
           BEDROCK_MODEL_ID: global.amazon.nova-2-lite-v1:0
           KILO_BASE_URL: https://api.kilo.ai/api/gateway
-          KILO_MODEL_ID: nvidia/nemotron-3-ultra-550b-a55b:free
+          KILO_MODEL_ID: deepseek/deepseek-v4-flash-0731:free
+          KILO_FALLBACK_MODEL_ID: nvidia/nemotron-3-super-120b-a12b:free
+          KILO_SECOND_FALLBACK_MODEL_ID: kilo-auto/free
           EVENTS_HTTP_ENDPOINT: !GetAtt EventsApi.Dns.Http
           USERS_TABLE: !Ref UsersTable
           HOLDINGS_TABLE: !Ref HoldingsTable
@@ -543,7 +545,7 @@ Resources:
             TableName: !Ref ChatJobsTable
         - S3CrudPolicy:
             BucketName: !Ref DataBucket
-        # Bedrock global inference (Nova 2 Lite) — all 3 statements required. See architecture.md.
+        # Bedrock global inference (Nova 2 Lite) — parked; all 3 statements required.
         - Statement:
             - Sid: GrantGlobalCrisInferenceProfileRegionAccess
               Effect: Allow

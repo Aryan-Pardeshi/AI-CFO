@@ -10,6 +10,7 @@ import OnboardingMethod from './pages/OnboardingMethod';
 import ManualEntry from './pages/ManualEntry';
 import CSVUpload from './pages/CSVUpload';
 import Overview from './pages/dashboard/Overview';
+import FireForecast from './pages/dashboard/FireForecast';
 import Advisory from './pages/dashboard/Advisory';
 import Milestones from './pages/dashboard/Milestones';
 import BalanceSheet from './pages/dashboard/BalanceSheet';
@@ -40,6 +41,7 @@ function App() {
               {/* Dashboard Routes (Protected) */}
               <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                 <Route path="overview" element={<Overview />} />
+                <Route path="fire" element={<FireForecast />} />
                 <Route path="ai-advisory" element={<Advisory />} />
                 <Route path="milestones" element={<Milestones />} />
                 <Route path="balance-sheet" element={<BalanceSheet />} />

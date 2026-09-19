@@ -52,6 +52,8 @@ from .auth import (
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+SAFE_CHAT_DISPATCH_ERROR = "Unable to start this chat right now. Please try again."
+
 ROUTES: list[tuple[str, str]] = [
     ("GET", r"/portfolio/analysis"),
     ("GET", r"/securities/search"),
@@ -85,6 +87,7 @@ LIVE_ROUTES = {
     ("POST", "/fire/goal-impact"),
     ("GET", "/net-worth"),
     ("GET", "/net-worth/projection"),
+    ("POST", "/chat"),
 }
 
 TXN_CATEGORIES = {
@@ -168,6 +171,98 @@ def _table(env_var: str):
 
 def _statement_jobs_table():
     return _table("STATEMENT_JOBS_TABLE")
+
+
+def _chat_jobs_table():
+    return _table("CHAT_JOBS_TABLE")
+
+
+_lambda = None
+
+
+def _lambda_client():
+    global _lambda
+    if _lambda is None:
+        import boto3
+
+        _lambda = boto3.client("lambda")
+    return _lambda
+
+
+def _chat_uuid(value: object | None) -> str:
+    if value is None:
+        return str(uuid.uuid4())
+    if not isinstance(value, str):
+        raise ValueError("must be a UUID string")
+    return str(uuid.UUID(value))
+
+
+def post_chat_route(user_id: str, body: dict) -> dict:
+    """Persist QUEUED then async-invoke AgentFunction. Identity = verified sub only."""
+    message = body.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return _validation("message is required and must be a non-empty string")
+    if len(message) > 8000:
+        return _validation("message must be at most 8000 characters")
+    try:
+        job_id = _chat_uuid(body.get("job_id"))
+        conversation_id = _chat_uuid(body.get("conversation_id"))
+    except ValueError:
+        return _validation("job_id and conversation_id must be UUID strings")
+    now = datetime.now(timezone.utc).isoformat()
+    job = {
+        "user_id": user_id,
+        "job_id": job_id,
+        "conversation_id": conversation_id,
+        "status": "QUEUED",
+        "message": message.strip(),
+        "tool_calls": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    table = _chat_jobs_table()
+    try:
+        table.put_item(
+            Item=job,
+            ConditionExpression="attribute_not_exists(user_id) AND attribute_not_exists(job_id)",
+        )
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            existing = table.get_item(
+                Key={"user_id": user_id, "job_id": job_id}
+            ).get("Item")
+            if existing and existing.get("user_id") == user_id:
+                return _ok({"job_id": job_id,
+                            "conversation_id": existing.get("conversation_id") or conversation_id},
+                           200)
+            return _conflict("chat job already exists")
+        raise
+    try:
+        agent_name = os.environ.get("AGENT_FUNCTION_NAME")
+        if not agent_name:
+            raise RuntimeError("Missing AGENT_FUNCTION_NAME")
+        # Verified identity only — never any client-supplied id, email, or token.
+        _lambda_client().invoke(
+            FunctionName=agent_name,
+            InvocationType="Event",
+            Payload=json.dumps({
+                "user_id": user_id,
+                "job_id": job_id,
+                "conversation_id": conversation_id,
+                "message": message.strip(),
+            }),
+        )
+    except Exception as exc:
+        logger.info({"event": "chat_async_dispatch_failed",
+                     "error_class": type(exc).__name__})
+        job.update({"status": "FAILED", "error": SAFE_CHAT_DISPATCH_ERROR,
+                    "updated_at": datetime.now(timezone.utc).isoformat()})
+        try:
+            table.put_item(Item=job)
+        except Exception as mark_exc:
+            logger.info({"event": "chat_dispatch_failure_unpersisted",
+                         "error_class": type(mark_exc).__name__})
+    return _ok({"job_id": job_id, "conversation_id": conversation_id}, 202)
 
 
 def _transactions_table():
@@ -979,6 +1074,8 @@ def handler(event: dict, context) -> dict:
             return commit_statement_route(user_id, commit_match.group(1), body)
         if method == "GET" and path == "/cashflow/summary":
             return cashflow_summary_route(user_id)
+        if method == "POST" and path == "/chat":
+            return post_chat_route(user_id, body)
         data = load_user_data(user_id)
         if (method, path) == ("GET", "/portfolio/analysis"):
             return portfolio_analysis_route(data)

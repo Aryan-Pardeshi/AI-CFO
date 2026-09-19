@@ -39,7 +39,8 @@ const DashboardLayout = () => {
         height: '70px',
         position: 'sticky',
         top: 0,
-        zIndex: 100
+        zIndex: 100,
+        boxShadow: 'var(--shadow-sm)',
       }}>
         {/* Logo / Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -48,9 +49,6 @@ const DashboardLayout = () => {
             alt="ARIA"
             style={{ width: '56px', height: '56px', objectFit: 'contain', flexShrink: 0 }}
           />
-          <div>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>AI CFO Intelligence</span>
-          </div>
         </div>
 
         {/* Navigation Links */}
@@ -63,20 +61,20 @@ const DashboardLayout = () => {
         </nav>
 
         {/* Right Actions (Profile, Theme, Logout) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-          <button onClick={toggleTheme} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          <button onClick={toggleTheme} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', padding: '0.5rem', borderRadius: '8px' }}>
             {isDarkMode ? <FiSun size={20} /> : <FiMoon size={20} />}
           </button>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
-            <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <FiUser size={16} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)', fontSize: '0.875rem', background: 'var(--surface-muted)', padding: '0.35rem 0.85rem', borderRadius: '9999px', border: '1px solid var(--border-color)' }}>
+            <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--accent-color)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <FiUser size={13} />
             </div>
-            <span>{userEmail?.split('@')[0]}</span>
+            <span style={{ fontWeight: 600 }}>{userEmail?.split('@')[0]}</span>
           </div>
           
-          <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <FiLogOut size={16} /> <span style={{ fontSize: '0.875rem' }}>Logout</span>
+          <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.875rem', fontWeight: 500, padding: '0.5rem 0.75rem', borderRadius: '8px' }}>
+            <FiLogOut size={16} /> <span>Logout</span>
           </button>
         </div>
       </header>

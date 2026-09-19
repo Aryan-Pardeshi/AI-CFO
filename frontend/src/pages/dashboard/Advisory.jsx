@@ -1,50 +1,349 @@
-import React from 'react';
-import Input from '../../components/ui/Input';
-import Button from '../../components/ui/Button';
+import React, { useEffect, useRef, useState } from 'react';
+import './Advisory.css';
+import {
+  SUGGESTED_PROMPTS,
+  assistantStatusLabel,
+  extractAssistantText,
+  getChatJob,
+  getConversationMessages,
+  isTerminalStatus,
+  listConversations,
+  normalizeMessages,
+  pollChatJob,
+  shouldSubmitOnKeyDown,
+  startChatJob,
+} from '../../lib/chatApi.js';
+
+const SAFE_START_ERROR = 'Could not start that chat. Please try again.';
+const SAFE_JOB_ERROR = 'Something went wrong preparing that answer. Please try again.';
+
+const TOPIC_CHIPS = [
+  { label: 'Portfolio', prompt: 'Analyze my portfolio allocation and diversification.' },
+  { label: 'FIRE plan', prompt: 'How does my current savings rate impact my FIRE plan?' },
+  { label: 'Net worth', prompt: 'Show my financial snapshot and net worth breakdown.' },
+  { label: 'Goals', prompt: 'What financial milestones and goals should I prioritize?' },
+];
 
 const Advisory = () => {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState(null);
+  const [conversationId, setConversationId] = useState(undefined);
+  const [conversations, setConversations] = useState([]);
+  const [lastPrompt, setLastPrompt] = useState('');
+  const pollStop = useRef(null);
+  const msgSeq = useRef(0);
+  const textareaRef = useRef(null);
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    listConversations()
+      .then((data) => {
+        if (cancelled) return;
+        const list = Array.isArray(data?.conversations) ? data.conversations : [];
+        if (list.length > 0) setConversations(list);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => () => pollStop.current?.(), []);
+
+  useEffect(() => {
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    if (typeof messagesEndRef.current?.scrollIntoView === 'function') {
+      messagesEndRef.current.scrollIntoView({
+        behavior: prefersReducedMotion ? 'auto' : 'smooth',
+      });
+    }
+  }, [messages, status]);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = `${Math.min(scrollHeight, 160)}px`;
+    }
+  }, [input]);
+
+  const handleNewChat = () => {
+    pollStop.current?.();
+    pollStop.current = null;
+    setMessages([]);
+    setError(null);
+    setLastPrompt('');
+    setConversationId(undefined);
+    setInput('');
+    setStatus('');
+    setBusy(false);
+  };
+
+  const send = async (rawText) => {
+    const text = (rawText ?? '').trim();
+    if (!text || busy) return;
+    pollStop.current?.();
+    pollStop.current = null;
+    setError(null);
+    setBusy(true);
+    setLastPrompt(text);
+    const userMsg = { id: `u-${++msgSeq.current}`, role: 'user', content: text };
+    const pendingId = `a-${msgSeq.current}`;
+    setMessages((prev) => [...prev, userMsg]);
+    setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    setStatus('Preparing answer…');
+    setMessages((prev) => [...prev, { id: pendingId, role: 'assistant', content: '', pending: true }]);
+
+    let job;
+    try {
+      job = await startChatJob({ message: text, conversationId });
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== pendingId));
+      setBusy(false);
+      setStatus('');
+      setError({ message: SAFE_START_ERROR });
+      return;
+    }
+    if (job.conversation_id) setConversationId(job.conversation_id);
+
+    pollStop.current = pollChatJob(job.job_id, {
+      getStatus: () => getChatJob(job.job_id),
+      intervalMs: 1500,
+      onUpdate: (update) => {
+        if (isTerminalStatus(update.status)) {
+          pollStop.current?.();
+          pollStop.current = null;
+          setBusy(false);
+          setStatus('');
+          if (update.status === 'COMPLETED') {
+            const answer = extractAssistantText(update);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === pendingId ? { ...m, content: answer, pending: false } : m)),
+            );
+          } else {
+            setMessages((prev) => prev.filter((m) => m.id !== pendingId));
+            setError({ message: SAFE_JOB_ERROR });
+          }
+        } else {
+          setStatus(assistantStatusLabel(update));
+        }
+      },
+    });
+  };
+
+  const loadConversation = async (id) => {
+    if (!id) return;
+    setConversationId(id);
+    setError(null);
+    try {
+      const data = await getConversationMessages(id);
+      setMessages(
+        normalizeMessages(data).map((m) => ({ ...m, id: `h-${++msgSeq.current}` })),
+      );
+    } catch {
+      setError({ message: 'Could not load that conversation. Please try again.' });
+    }
+  };
+
+  const showHistory = conversations.length > 0;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', background: 'var(--surface-color)', border: '1px solid var(--border-color)' }}>
-      {/* Header */}
-      <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-color)' }}>
-        <h2 style={{ margin: 0, fontSize: '1.25rem' }}>ARIA Advisory</h2>
-        <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Your private AI wealth intelligence.</p>
-      </div>
+    <div className="advisory-page">
+      {/* Header - Open, unboxed */}
+      <header className="advisory-header">
+        <div className="advisory-header-content">
+          <h2 className="advisory-title">ARIA Advisory</h2>
+          <p className="advisory-subtitle">Your private AI wealth intelligence.</p>
+        </div>
+        {showHistory && (
+          <div className="advisory-history-controls">
+            <label htmlFor="chat-history" className="advisory-history-label">Past chats</label>
+            <select
+              id="chat-history"
+              value={conversationId ?? ''}
+              onChange={(e) => {
+                if (e.target.value === '') {
+                  handleNewChat();
+                } else {
+                  loadConversation(e.target.value);
+                }
+              }}
+              className="advisory-history-select"
+            >
+              <option value="">Select chat</option>
+              {conversations.map((c) => (
+                <option key={c.conversation_id ?? c.id} value={c.conversation_id ?? c.id}>
+                  {c.title ?? c.conversation_id ?? c.id}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="advisory-new-chat-btn"
+              onClick={handleNewChat}
+            >
+              New chat
+            </button>
+          </div>
+        )}
+      </header>
 
       {/* Chat Area */}
-      <div style={{ flex: 1, padding: '2rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        
-        {/* User Message */}
-        <div style={{ alignSelf: 'flex-end', maxWidth: '70%' }}>
-          <div style={{ background: 'var(--accent-color)', color: 'white', padding: '1rem', borderRadius: '8px 8px 0 8px', fontSize: '0.95rem', lineHeight: 1.5 }}>
-            Hello ARIA, can you analyze my recent spending and suggest where I can cut back to increase my savings rate to 25%?
+      <div className="advisory-chat-area" aria-label="Chat messages" role="log">
+        {messages.length === 0 && (
+          <div className="advisory-empty-state">
+            <h2 className="advisory-empty-title">How can ARIA help?</h2>
+            <div className="advisory-topic-chips-row">
+              {TOPIC_CHIPS.map((chip) => (
+                <button
+                  key={chip.label}
+                  type="button"
+                  className="advisory-topic-chip"
+                  onClick={() => send(chip.prompt)}
+                  disabled={busy}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
+            <div className="advisory-suggestions-section">
+              <div className="advisory-suggestions-list">
+                {SUGGESTED_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="advisory-suggestion-row"
+                    onClick={() => send(prompt)}
+                    disabled={busy}
+                  >
+                    <span>{prompt}</span>
+                    <svg
+                      className="advisory-suggestion-arrow"
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem', textAlign: 'right' }}>
-            Today, 10:42 AM
-          </div>
-        </div>
+        )}
 
-        {/* AI Message */}
-        <div style={{ alignSelf: 'flex-start', maxWidth: '70%' }}>
-          <div style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', padding: '1rem', borderRadius: '8px 8px 8px 0', fontSize: '0.95rem', lineHeight: 1.5 }}>
-            <strong>ARIA Advisory is currently in Setup Mode.</strong><br/><br/>
-            Our team is wiring up the intelligence engine. Stay tuned for real-time portfolio analysis and wealth-building insights.
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-            ARIA • Today, 10:42 AM
-          </div>
-        </div>
+        {messages.map((msg) =>
+          msg.role === 'user' ? (
+            <div key={msg.id} className="advisory-message-row user">
+              <div className="advisory-bubble user">
+                {msg.content}
+              </div>
+            </div>
+          ) : (
+            <div key={msg.id} className="advisory-message-row assistant">
+              <div className="advisory-assistant-meta">
+                <span className="advisory-avatar-dot" aria-hidden="true" />
+                <span>ARIA</span>
+              </div>
+              <div className="advisory-bubble assistant">
+                {msg.pending ? (
+                  <div className="advisory-pending-content" role="status" aria-live="polite">
+                    <span className="advisory-dots" aria-hidden="true">
+                      <span className="advisory-dot" />
+                      <span className="advisory-dot" />
+                      <span className="advisory-dot" />
+                    </span>
+                    <span className="advisory-status-text">
+                      {status || 'Preparing answer…'}
+                    </span>
+                  </div>
+                ) : (
+                  msg.content
+                )}
+              </div>
+            </div>
+          ),
+        )}
 
+        {error && (
+          <div className="advisory-message-row error">
+            <div className="advisory-bubble error">
+              {error.message}
+            </div>
+            <button
+              type="button"
+              className="advisory-retry-btn"
+              onClick={() => send(lastPrompt)}
+              disabled={busy || !lastPrompt}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div style={{ padding: '1.5rem', borderTop: '1px solid var(--border-color)', background: 'var(--bg-color)' }}>
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <div style={{ flex: 1 }}>
-            <Input id="chat-input" placeholder="Ask ARIA about your finances..." disabled={true} />
-          </div>
-          <Button disabled={true}>Send</Button>
+      {/* Sticky rounded textarea composer */}
+      <div className="advisory-composer-container">
+        <div className="advisory-composer">
+          <label htmlFor="chat-input" className="sr-only">Ask ARIA about your finances</label>
+          <textarea
+            ref={textareaRef}
+            id="chat-input"
+            className="advisory-textarea"
+            placeholder="Ask ARIA about your finances..."
+            value={input}
+            disabled={busy}
+            rows={1}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (shouldSubmitOnKeyDown(e)) {
+                e.preventDefault();
+                send(input);
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="advisory-send-btn"
+            aria-label="Send message"
+            title="Send message"
+            onClick={() => send(input)}
+            disabled={busy || !input.trim()}
+          >
+            <svg
+              className="advisory-send-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+          </button>
         </div>
+        <p className="advisory-disclaimer">
+          Educational insights from your saved data. Not investment advice.
+        </p>
       </div>
     </div>
   );
