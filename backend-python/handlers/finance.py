@@ -446,17 +446,29 @@ def _fire_loan_inputs(
 
 
 def _fire_goal_inputs(goals: list[dict]) -> list[dict]:
-    return [
-        {
+    out = []
+    for g in goals:
+        amt = g.get("amount_today_paise")
+        target = g.get("target_age")
+        if amt is None or target is None:
+            continue
+        infl = g.get("inflation_rate")
+        try:
+            infl_val = float(infl) if infl is not None else None
+        except (ValueError, TypeError):
+            infl_val = None
+        try:
+            amt_val = int(amt)
+            target_val = int(target)
+        except (ValueError, TypeError):
+            continue
+        out.append({
             "goal_type": g.get("goal_type"),
-            "amount_today_paise": g.get("amount_today_paise"),
-            "target_age": g.get("target_age"),
-            "inflation_rate": g.get("inflation_rate"),
-        }
-        for g in goals
-        if g.get("amount_today_paise") is not None
-        and g.get("target_age") is not None
-    ]
+            "amount_today_paise": amt_val,
+            "target_age": target_val,
+            "inflation_rate": infl_val,
+        })
+    return out
 
 
 def _parse_body(event: dict, *, strip_identity: bool = True) -> dict:

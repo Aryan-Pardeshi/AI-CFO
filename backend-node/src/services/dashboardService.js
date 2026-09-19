@@ -25,7 +25,9 @@ function compatibleSnapshot(profile, holdings, loans = []) {
       ...saved,
       incomes: saved.incomes && typeof saved.incomes === "object" ? saved.incomes : {},
       liquidAssets: saved.liquidAssets && typeof saved.liquidAssets === "object" ? saved.liquidAssets : {},
-      portfolio: Array.isArray(saved.portfolio) ? saved.portfolio : [],
+      portfolio: Array.isArray(saved.portfolio) && saved.portfolio.length > 0
+        ? saved.portfolio
+        : snapshotFromCanonical({ holdings }).portfolio,
       preferences: saved.preferences && typeof saved.preferences === "object" ? {
         industries: Array.isArray(saved.preferences.industries) ? saved.preferences.industries : [],
         instruments: Array.isArray(saved.preferences.instruments) ? saved.preferences.instruments : [],

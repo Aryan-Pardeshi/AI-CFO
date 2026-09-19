@@ -75,7 +75,10 @@ def contribution_at_age(
 
 def goal_inflation_rate(goal: dict) -> float:
     if goal.get("inflation_rate") is not None:
-        return goal["inflation_rate"]
+        try:
+            return float(goal["inflation_rate"])
+        except (ValueError, TypeError):
+            pass
     if goal.get("goal_type") == "EDUCATION":
         return EDUCATION_DEFAULT_INFLATION
     return GOAL_DEFAULT_INFLATION
