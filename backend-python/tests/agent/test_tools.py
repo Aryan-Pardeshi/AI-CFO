@@ -46,7 +46,9 @@ def test_proposal_accepts_valid_names_from_trusted_current_turn(name):
         "goal", "create", payload={"name": name},
         tool_context=SimpleNamespace(invocation_state={"message": f"Create a {name} goal"}),
     )
-    assert proposal == {"entity": "goal", "operation": "create", "payload": {"name": name}}
+    assert proposal["entity"] == "goal"
+    assert proposal["payload"] == {"name": name}
+    assert proposal["expires_at"].endswith("Z")
 
 
 def test_proposal_name_requires_trusted_current_turn():

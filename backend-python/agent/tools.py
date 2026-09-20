@@ -8,7 +8,7 @@ engines/routes, returns {ok, data, source, as_of, assumptions, warnings} or
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import math
 import os
 import re
@@ -198,9 +198,27 @@ def record_citation(source: str, as_of: str, title: str | None = None,
     return result
 
 
+def _proposal_expiry() -> str:
+    """Issue a server-owned short expiry; models never control proposal lifetime."""
+    return (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _validate_expiry(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]{1,30}Z", value):
+        raise ValueError("proposal expiry must be UTC ISO formatted")
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("proposal expiry is invalid") from exc
+    if expiry <= datetime.now(timezone.utc):
+        raise ValueError("proposal has expired")
+    return value
+
+
 def _validate_proposal(entity: str, operation: str, *, target: str | None = None,
                        payload: dict | None = None, current_message: str | None = None,
-                       require_user_text: bool = True) -> dict:
+                       require_user_text: bool = True, expires_at: str | None = None,
+                       issue_expiry: bool = False) -> dict:
     """Validate a proposal; proposals are metadata only and are never persisted as writes."""
     if entity not in SAFE_ACTION_ENTITIES:
         raise ValueError("unsupported action entity")
@@ -226,6 +244,10 @@ def _validate_proposal(entity: str, operation: str, *, target: str | None = None
         result["target"] = target.strip()
     if payload is not None:
         result["payload"] = payload
+    if expires_at is not None:
+        result["expires_at"] = _validate_expiry(expires_at)
+    elif issue_expiry:
+        result["expires_at"] = _proposal_expiry()
     _assert_safe_metadata(result)
     return result
 
@@ -235,14 +257,15 @@ def propose_action(entity: str, operation: str, *, target: str | None = None,
                    payload: dict | None = None, tool_context=None) -> dict:
     current_message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
     return _validate_proposal(entity, operation, target=target, payload=payload,
-                              current_message=current_message, require_user_text=True)
+                              current_message=current_message, require_user_text=True,
+                              issue_expiry=True)
 
 
 def validate_stored_action(entity: str, operation: str, *, target: str | None = None,
-                           payload: dict | None = None) -> dict:
+                           payload: dict | None = None, expires_at: str | None = None) -> dict:
     """Revalidate persisted metadata without treating storage as a user turn."""
     return _validate_proposal(entity, operation, target=target, payload=payload,
-                              require_user_text=False)
+                              require_user_text=False, expires_at=expires_at)
 
 
 class ToolCapExceeded(Exception):

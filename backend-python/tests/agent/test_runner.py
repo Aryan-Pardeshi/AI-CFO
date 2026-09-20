@@ -151,6 +151,7 @@ def test_real_tool_result_is_saved_as_citation_and_model_proposal_is_saved():
     )
     assert job["citations"] == [{"source": "holdings", "as_of": "2026-09-20"}]
     assert job["proposed_actions"][0]["entity"] == "goal"
+    assert job["proposed_actions"][0]["expires_at"].endswith("Z")
 
 
 def test_runner_shares_firecrawl_guard_and_client_for_one_job():

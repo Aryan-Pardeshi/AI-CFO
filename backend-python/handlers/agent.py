@@ -139,7 +139,8 @@ def get_chat_job_route(user_id: str, job_id: str) -> dict:
             if not isinstance(proposal, dict):
                 raise ValueError("invalid proposal")
             validated = tools_mod.validate_stored_action(proposal.get("entity"), proposal.get("operation"),
-                                                         target=proposal.get("target"), payload=proposal.get("payload"))
+                                                         target=proposal.get("target"), payload=proposal.get("payload"),
+                                                         expires_at=proposal.get("expires_at"))
             if validated != proposal:
                 raise ValueError("invalid proposal shape")
             out["proposed_actions"].append(validated)

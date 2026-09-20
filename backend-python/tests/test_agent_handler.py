@@ -17,7 +17,7 @@ def test_get_chat_job_returns_safe_metadata_fields(monkeypatch):
                 "status": "COMPLETED", "answer": "grounded",
                 "tool_activity": [{"tool": "get_net_worth", "status": "completed"}],
                 "citations": [{"source": "holdings", "as_of": "2026-09-20"}],
-                "proposed_actions": [{"entity": "goal", "operation": "create", "payload": {"name": "car"}}],
+                "proposed_actions": [{"entity": "goal", "operation": "create", "payload": {"name": "car"}, "expires_at": "2099-01-01T00:00:00Z"}],
             }}
 
     monkeypatch.setattr(handler, "_chat_jobs_table", lambda: Table())
@@ -26,6 +26,7 @@ def test_get_chat_job_returns_safe_metadata_fields(monkeypatch):
     assert body["tool_activity"][0]["tool"] == "get_net_worth"
     assert body["citations"][0]["source"] == "holdings"
     assert body["proposed_actions"][0]["operation"] == "create"
+    assert body["proposed_actions"][0]["expires_at"] == "2099-01-01T00:00:00Z"
     assert "user_id" not in json.dumps(body)
 
 

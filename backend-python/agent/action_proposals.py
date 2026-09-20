@@ -16,7 +16,8 @@ def _preview(entity: str, operation: str, *, target: str | None = None,
     message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
     from agent.tools import _validate_proposal
     result = _validate_proposal(entity, operation, target=target, payload=payload,
-                                current_message=message, require_user_text=True)
+                                current_message=message, require_user_text=True,
+                                issue_expiry=True)
     result["preview"] = True
     result["requires_confirmation"] = True
     return result
