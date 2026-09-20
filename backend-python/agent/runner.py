@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -366,7 +367,7 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
                     try:
                         item = tools_mod.propose_action(action.get("entity"), action.get("operation"),
                                                         target=action.get("target"), payload=action.get("payload"),
-                                                        current_message=message)
+                                                        tool_context=SimpleNamespace(invocation_state={"message": message}))
                         if item not in metadata["proposed_actions"]:
                             metadata["proposed_actions"].append(item)
                     except (TypeError, ValueError):

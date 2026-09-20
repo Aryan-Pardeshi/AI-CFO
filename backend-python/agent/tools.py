@@ -44,6 +44,10 @@ _RAW_FIELDS = frozenset({"result", "raw", "output", "response", "toolresult", "t
 _KNOWN_CITATION_SOURCES = frozenset({"holdings", "goals", "fire-engine", "networth-engine", "transactions", "MANUAL", "Firecrawl", "Upstox", "mfapi"})
 _KNOWN_CITATION_DOMAINS = frozenset({"rbi.org.in", "sebi.gov.in", "incometax.gov.in", "amfiindia.com", "upstox.com", "mfapi.in"})
 _RAW_MARKERS = re.compile(r"\b(?:tool|output|result|holding|allocation|response|raw)\b", re.IGNORECASE)
+_RAW_OUTPUT_MARKERS = re.compile(
+    r"\b(?:raw[\s_-]+(?:tool[\s_-]+)?|tool[\s_-]+|complete[\s_-]+)(?:output|result|response)s?\b",
+    re.IGNORECASE,
+)
 _ACTION_FIELDS = {
     "profile": {"name", "date_of_birth", "base_currency", "monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "declared_net_worth_paise", "cash_balance_paise", "emergency_fund_target_months", "risk_profile", "risk_score", "investment_horizon_years", "strategy_goal", "dependents_count", "employment_type", "city_tier", "onboarded"},
     "dashboard_financials": {"monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "cash_balance_paise", "declared_net_worth_paise"},
@@ -121,6 +125,8 @@ def _validate_action_payload(entity: str, payload: dict, *, allow_name: bool = F
                 raise ValueError("proposal date must be ISO formatted")
         else:
             _safe_string(value, field=key)
+            if _RAW_OUTPUT_MARKERS.search(value):
+                raise ValueError("proposal label contains raw-output markers")
             if key == "name" and not allow_name:
                 raise ValueError("free-text action names require the current user message")
     return payload
@@ -203,10 +209,8 @@ def _validate_proposal(entity: str, operation: str, *, target: str | None = None
 
 @tool(context=True)
 def propose_action(entity: str, operation: str, *, target: str | None = None,
-                   payload: dict | None = None, current_message: str | None = None,
-                   tool_context=None) -> dict:
-    if current_message is None and tool_context is not None:
-        current_message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
+                   payload: dict | None = None, tool_context=None) -> dict:
+    current_message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
     return _validate_proposal(entity, operation, target=target, payload=payload,
                               current_message=current_message, require_user_text=True)
 
