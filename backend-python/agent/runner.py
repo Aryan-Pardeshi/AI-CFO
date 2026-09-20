@@ -102,6 +102,28 @@ def _latest_turn_instruction(message: str) -> str:
     """Keep a fresh request from being eclipsed by a persisted assistant turn."""
 
     normalized = message.lower()
+    if any(term in normalized for term in ("tax", "income tax", "capital gain", "capital gains")):
+        return (
+            "LATEST REQUEST ROUTING: This is a tax estimate request. Call "
+            "estimate_income_tax, compare_tax_regimes, or estimate_capital_gains_tax "
+            "as appropriate before answering."
+        )
+    if any(term in normalized for term in ("insurance", "term cover", "health cover")):
+        return (
+            "LATEST REQUEST ROUTING: This is an insurance estimate request. Call "
+            "estimate_insurance_needs before answering."
+        )
+    if any(term in normalized for term in ("emi", "loan", "prepayment", "credit card")):
+        return (
+            "LATEST REQUEST ROUTING: This is a loan or debt-calculator request. Call "
+            "calculate_emi, calculate_prepayment_impact, or calculate_credit_card_payoff "
+            "as appropriate before answering."
+        )
+    if any(term in normalized for term in ("short term", "short-term", "horizon")):
+        return (
+            "LATEST REQUEST ROUTING: This is a short-term fit request. Call "
+            "analyze_short_term_fit before answering; do not give a buy or sell signal."
+        )
     if any(term in normalized for term in (
         "cashflow", "cash flow", "transaction", "transactions", "spending",
         "spend", "income", "expenses", "expense",
@@ -110,6 +132,11 @@ def _latest_turn_instruction(message: str) -> str:
             "LATEST REQUEST ROUTING: This is a cashflow request. Call "
             "get_cashflow_summary before answering. Do not calculate_fire or "
             "reuse a prior FIRE answer for this request."
+        )
+    if any(term in normalized for term in ("update", "change", "edit", "set my", "create", "save")):
+        return (
+            "LATEST REQUEST ROUTING: This is an action request. Call the relevant "
+            "propose_* tool to create a validated preview; never write to the database."
         )
     if "fire" in normalized or "financial independence" in normalized:
         return (

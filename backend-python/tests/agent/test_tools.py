@@ -137,3 +137,33 @@ def test_citations_allow_safe_firecrawl_fields_but_reject_raw_labels():
         tools.record_citation("api_key", "2026-09-20")
     with pytest.raises(ValueError):
         tools.record_citation("Firecrawl", "2026-09-20", title="complete tool output holdings allocation")
+
+
+def test_registry_exposes_grounded_calculators_and_account_reads():
+    from agent import tools
+
+    names = set(tools.get_tool_registry())
+    assert {
+        "get_profile", "get_holdings", "get_loans", "get_goals",
+        "calculate_emi", "calculate_prepayment_impact",
+        "estimate_income_tax", "compare_tax_regimes",
+        "estimate_insurance_needs", "calculate_credit_card_payoff",
+        "analyze_short_term_fit", "propose_profile_update",
+    } <= names
+
+
+def test_calculator_tool_converts_paise_inputs_at_model_boundary_and_rejects_bad_input():
+    from agent import tools
+    context = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
+    result = tools.calculate_credit_card_payoff(
+        outstanding_inr=1000, monthly_interest_pct=2, monthly_payment_inr=100,
+        tool_context=context,
+    )
+    assert result["ok"] is True
+    assert result["data"]["total_interest_inr"] >= 0
+    invalid = tools.calculate_credit_card_payoff(
+        outstanding_inr=-1, monthly_interest_pct=2, monthly_payment_inr=100,
+        tool_context=context,
+    )
+    assert invalid["ok"] is False
+    assert invalid["error_code"] == "VALIDATION_ERROR"

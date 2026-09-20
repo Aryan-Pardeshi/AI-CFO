@@ -598,6 +598,153 @@ def get_cashflow_summary(tool_context) -> dict:
                      source="transactions", as_of=_now())
 
 
+def _read_collection(tool_context, name: str, source: str) -> dict:
+    user_id = _check_cap(tool_context, name)
+    try:
+        from handlers.finance import load_user_data
+        data = load_user_data(user_id)
+    except Exception:
+        try:
+            data = _load_user_data(user_id)
+        except Exception as exc:
+            return err_result("UNAVAILABLE", f"{source} data is unavailable right now.")
+    if name == "get_profile" and not data.get("user"):
+        return err_result("NOT_FOUND", "User profile not found")
+    values = data.get(source, []) if source != "profile" else data.get("user")
+    if not values and source != "profile":
+        return err_result("NOT_FOUND", f"No {source} data found")
+    return ok_result(_rupeeify({source: values}), source=source, as_of=_now())
+
+
+@tool(context=True)
+def get_profile(tool_context) -> dict:
+    return _read_collection(tool_context, "get_profile", "profile")
+
+
+@tool(context=True)
+def get_holdings(tool_context) -> dict:
+    return _read_collection(tool_context, "get_holdings", "holdings")
+
+
+@tool(context=True)
+def get_loans(tool_context) -> dict:
+    return _read_collection(tool_context, "get_loans", "loans")
+
+
+def _calculator_context(tool_context, name: str) -> None:
+    _check_cap(tool_context, name)
+
+
+@tool(context=True)
+def calculate_emi(principal_inr: float, annual_rate_pct: float, tenure_months: int, tool_context) -> dict:
+    _calculator_context(tool_context, "calculate_emi")
+    try:
+        principal = float(principal_inr) * 100
+        rate = float(annual_rate_pct) / 100
+        tenure = int(tenure_months)
+        if principal < 0 or rate < 0 or rate > 0.36 or tenure < 1 or tenure > 480:
+            raise ValueError
+        from handlers.finance import _monthly_emi_paise
+        emi = _monthly_emi_paise(principal, rate, tenure)
+        return ok_result(_rupeeify({"principal_paise": round(principal), "monthly_emi_paise": round(emi), "tenure_months": tenure}), "loan-engine", _now())
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "principal, rate, and tenure are invalid")
+
+
+@tool(context=True)
+def calculate_prepayment_impact(principal_inr: float, annual_rate_pct: float,
+                                tenure_months: int, prepayment_inr: float,
+                                tool_context) -> dict:
+    _calculator_context(tool_context, "calculate_prepayment_impact")
+    try:
+        principal = float(principal_inr) * 100
+        prepayment = float(prepayment_inr) * 100
+        rate = float(annual_rate_pct) / 100
+        tenure = int(tenure_months)
+        if principal <= 0 or prepayment < 0 or prepayment >= principal or rate < 0 or tenure < 1 or tenure > 480:
+            raise ValueError
+        from handlers.finance import _monthly_emi_paise
+        emi = _monthly_emi_paise(principal, rate, tenure)
+        revised = _monthly_emi_paise(principal - prepayment, rate, tenure)
+        return ok_result(_rupeeify({"monthly_emi_paise": round(emi), "revised_monthly_emi_paise": round(revised), "prepayment_paise": round(prepayment), "interest_saving_paise": round(max(0, (emi - revised) * tenure))}), "loan-engine", _now())
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "loan and prepayment inputs are invalid")
+
+
+def _run_finance(name: str, func, kwargs: dict, tool_context) -> dict:
+    _calculator_context(tool_context, name)
+    try:
+        return ok_result(_rupeeify(func(**kwargs)), "finance-engine", _now())
+    except (TypeError, ValueError, OverflowError) as exc:
+        return err_result("VALIDATION_ERROR", str(exc))
+
+
+@tool(context=True)
+def estimate_income_tax(income_inr: float | None = None, regime: str = "new", tool_context=None) -> dict:
+    from finance.tax import estimate_income_tax as fn
+    return _run_finance("estimate_income_tax", fn, {"income_paise": None if income_inr is None else round(float(income_inr) * 100), "regime": regime}, tool_context)
+
+
+@tool(context=True)
+def compare_tax_regimes(income_inr: float | None = None, tool_context=None) -> dict:
+    from finance.tax import compare_tax_regimes as fn
+    return _run_finance("compare_tax_regimes", fn, {"income_paise": None if income_inr is None else round(float(income_inr) * 100)}, tool_context)
+
+
+@tool(context=True)
+def estimate_capital_gains_tax(gain_inr: float, asset_type: str = "LISTED_EQUITY", holding_period_months: int | None = None, tool_context=None) -> dict:
+    from finance.tax import estimate_capital_gains_tax as fn
+    return _run_finance("estimate_capital_gains_tax", fn, {"gain_paise": round(float(gain_inr) * 100), "asset_type": asset_type, "holding_period_months": holding_period_months}, tool_context)
+
+
+@tool(context=True)
+def estimate_insurance_needs(inputs: dict | None = None, tool_context=None) -> dict:
+    from finance.insurance import estimate_insurance_needs as fn
+    values = dict(inputs or {})
+    for key in list(values):
+        if key.endswith("_inr"):
+            values[key[:-4] + "_paise"] = round(float(values.pop(key)) * 100)
+    return _run_finance("estimate_insurance_needs", fn, {"inputs": values}, tool_context)
+
+
+@tool(context=True)
+def calculate_credit_card_payoff(outstanding_inr: float, monthly_interest_pct: float, monthly_payment_inr: float, tool_context=None) -> dict:
+    from finance.creditcard import calculate_credit_card_payoff as fn
+    return _run_finance("calculate_credit_card_payoff", fn, {"outstanding_paise": round(float(outstanding_inr) * 100), "monthly_interest_pct": monthly_interest_pct, "monthly_payment_paise": round(float(monthly_payment_inr) * 100)}, tool_context)
+
+
+@tool(context=True)
+def analyze_short_term_fit(price_history: list, horizon_months: int, tool_context=None) -> dict:
+    from finance.shortterm import analyze_short_term_fit as fn
+    return _run_finance("analyze_short_term_fit", fn, {"price_history": price_history, "horizon_months": horizon_months}, tool_context)
+
+
+def _proposal_tool(fn):
+    @tool(context=True)
+    def wrapped(*args, tool_context=None, **kwargs):
+        _calculator_context(tool_context, fn.__name__)
+        return fn(*args, tool_context=tool_context, **kwargs)
+    wrapped.__name__ = fn.__name__
+    return wrapped
+
+
+from agent.action_proposals import (
+    propose_dashboard_preferences, propose_fire_scenario,
+    propose_goal_update, propose_holding_update, propose_loan_update,
+    propose_holdings_update, propose_profile_update, propose_transaction_category_change,
+)
+
+
+propose_profile_update = _proposal_tool(propose_profile_update)
+propose_dashboard_preferences = _proposal_tool(propose_dashboard_preferences)
+propose_holding_update = _proposal_tool(propose_holding_update)
+propose_holdings_update = _proposal_tool(propose_holdings_update)
+propose_goal_update = _proposal_tool(propose_goal_update)
+propose_loan_update = _proposal_tool(propose_loan_update)
+propose_fire_scenario = _proposal_tool(propose_fire_scenario)
+propose_transaction_category_change = _proposal_tool(propose_transaction_category_change)
+
+
 def get_tool_registry() -> dict:
     return {
         "get_financial_snapshot": get_financial_snapshot,
@@ -608,5 +755,25 @@ def get_tool_registry() -> dict:
         "get_net_worth": get_net_worth,
         "project_net_worth": project_net_worth,
         "get_cashflow_summary": get_cashflow_summary,
+        "get_profile": get_profile,
+        "get_holdings": get_holdings,
+        "get_loans": get_loans,
+        "calculate_emi": calculate_emi,
+        "calculate_prepayment_impact": calculate_prepayment_impact,
+        "estimate_income_tax": estimate_income_tax,
+        "compare_tax_regimes": compare_tax_regimes,
+        "estimate_capital_gains_tax": estimate_capital_gains_tax,
+        "estimate_insurance_needs": estimate_insurance_needs,
+        "calculate_credit_card_payoff": calculate_credit_card_payoff,
+        "analyze_short_term_fit": analyze_short_term_fit,
+        "propose_profile_update": propose_profile_update,
+        "propose_dashboard_preferences": propose_dashboard_preferences,
+        "propose_holding_update": propose_holding_update,
+        "propose_holdings_update": propose_holdings_update,
+        "propose_profile_risk_update": propose_profile_update,
+        "propose_goal_update": propose_goal_update,
+        "propose_loan_update": propose_loan_update,
+        "propose_fire_scenario": propose_fire_scenario,
+        "propose_transaction_category_change": propose_transaction_category_change,
         "propose_action": propose_action,
     }
