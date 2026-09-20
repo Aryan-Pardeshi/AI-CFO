@@ -102,6 +102,16 @@ def _latest_turn_instruction(message: str) -> str:
     """Keep a fresh request from being eclipsed by a persisted assistant turn."""
 
     normalized = message.lower()
+    if any(term in normalized for term in ("update", "change", "edit", "set my", "create", "save my", "save this", "delete", "remove")):
+        return (
+            "LATEST REQUEST ROUTING: This is an action request. Call the relevant "
+            "propose_* tool to create a validated preview; never write to the database."
+        )
+    if any(term in normalized for term in ("security", "stock", "etf", "mutual fund", "isin", "ticker")):
+        return (
+            "LATEST REQUEST ROUTING: This is a security request. Call the relevant backed "
+            "portfolio/security tool before answering; never invent market data."
+        )
     if any(term in normalized for term in ("tax", "income tax", "capital gain", "capital gains")):
         return (
             "LATEST REQUEST ROUTING: This is a tax estimate request. Call "
@@ -132,11 +142,6 @@ def _latest_turn_instruction(message: str) -> str:
             "LATEST REQUEST ROUTING: This is a cashflow request. Call "
             "get_cashflow_summary before answering. Do not calculate_fire or "
             "reuse a prior FIRE answer for this request."
-        )
-    if any(term in normalized for term in ("update", "change", "edit", "set my", "create", "save")):
-        return (
-            "LATEST REQUEST ROUTING: This is an action request. Call the relevant "
-            "propose_* tool to create a validated preview; never write to the database."
         )
     if "fire" in normalized or "financial independence" in normalized:
         return (

@@ -32,3 +32,18 @@ Agent/finance focused suite after implementation:
 The repository's existing `test_only_shipped_tools_registered` still asserts the pre-ARIA-v2
 registry allow-list, so the full legacy agent suite reports that one expected contract failure.
 The new task registry intentionally includes the newly backed tools.
+
+## Fix round 1 TDD evidence
+
+Added failing regression tests for all six review findings, including the locked
+reduce-tenure prepayment mode, explicit proposal schemas, trusted-message binding, malformed
+calculator inputs, warning envelopes, and routing precedence. Initial RED run: 6 failures.
+
+After implementation, the complete agent/finance suite is green:
+
+```text
+134 passed
+```
+
+The contract allow-list now includes all newly shipped tools and retains only genuinely
+unshipped names as bans.

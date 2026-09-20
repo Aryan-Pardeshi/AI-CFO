@@ -13,7 +13,10 @@ def _preview(entity: str, operation: str, *, target: str | None = None,
              payload: dict[str, Any] | None = None, tool_context=None) -> dict:
     from agent.tools import validate_stored_action
 
-    result = validate_stored_action(entity, operation, target=target, payload=payload)
+    message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
+    from agent.tools import _validate_proposal
+    result = _validate_proposal(entity, operation, target=target, payload=payload,
+                                current_message=message, require_user_text=True)
     result["preview"] = True
     result["requires_confirmation"] = True
     return result

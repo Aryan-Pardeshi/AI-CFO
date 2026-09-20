@@ -167,3 +167,42 @@ def test_calculator_tool_converts_paise_inputs_at_model_boundary_and_rejects_bad
     )
     assert invalid["ok"] is False
     assert invalid["error_code"] == "VALIDATION_ERROR"
+
+
+def test_prepayment_defaults_to_reduce_tenure_and_includes_charge():
+    from agent import tools
+    context = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
+    result = tools.calculate_prepayment_impact(
+        principal_inr=100000, annual_rate_pct=12, tenure_months=120,
+        prepayment_inr=10000, prepayment_charge_pct=2, tool_context=context,
+    )
+    assert result["ok"] is True
+    assert result["data"]["mode"] == "reduce_tenure"
+    assert result["data"]["revised_tenure_months"] < 120
+    assert result["data"]["prepayment_charge_inr"] == 200
+
+
+def test_registered_proposals_have_concrete_model_signatures():
+    import inspect
+    from agent import tools
+    for name in ("propose_profile_update", "propose_goal_update", "propose_transaction_category_change"):
+        assert "*args" not in str(inspect.signature(tools.get_tool_registry()[name]))
+
+
+@pytest.mark.parametrize("name, kwargs", [
+    ("estimate_capital_gains_tax", {"gain_inr": "bad"}),
+    ("calculate_credit_card_payoff", {"outstanding_inr": "bad", "monthly_interest_pct": 2, "monthly_payment_inr": 100}),
+])
+def test_malformed_calculator_inputs_return_validation_errors(name, kwargs):
+    from agent import tools
+    context = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
+    result = tools.get_tool_registry()[name](tool_context=context, **kwargs)
+    assert result["ok"] is False
+    assert result["error_code"] == "VALIDATION_ERROR"
+
+
+def test_engine_warnings_are_promoted_to_result_envelope():
+    from agent import tools
+    context = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
+    result = tools.analyze_short_term_fit([100, 101], 12, tool_context=context)
+    assert result["warnings"]

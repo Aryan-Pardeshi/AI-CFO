@@ -21,3 +21,12 @@ def test_proposal_helpers_validate_payloads():
 
     with pytest.raises(ValueError):
         propose_goal_update("g-1", {"amount_today_paise": -1})
+
+
+def test_proposal_free_text_must_come_from_invocation_message():
+    import pytest
+    from agent.action_proposals import propose_goal_update
+
+    context = SimpleNamespace(invocation_state={"message": "Update my wedding goal"})
+    with pytest.raises(ValueError):
+        propose_goal_update("g-1", {"name": "Invented goal"}, tool_context=context)

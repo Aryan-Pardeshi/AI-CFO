@@ -18,16 +18,20 @@ ALLOWED_TOOLS = {
     "get_net_worth",
     "project_net_worth",
     "get_cashflow_summary",
+    "get_profile", "get_holdings", "get_loans",
+    "calculate_emi", "calculate_prepayment_impact",
+    "estimate_income_tax", "compare_tax_regimes", "estimate_capital_gains_tax",
+    "estimate_insurance_needs", "calculate_credit_card_payoff", "analyze_short_term_fit",
+    "propose_profile_update", "propose_profile_risk_update", "propose_dashboard_preferences",
+    "propose_holding_update", "propose_holdings_update", "propose_goal_update",
+    "propose_loan_update", "propose_fire_scenario", "propose_transaction_category_change",
     "propose_action",
 }
 
 UNSHIPPED = [
     "search_securities", "get_security_overview", "get_security_risk_metrics",
     "analyze_portfolio_fit", "upstox", "mfapi", "firecrawl", "web_search",
-    "read_web_page", "estimate_income_tax", "compare_tax_regimes",
-    "estimate_capital_gains_tax", "estimate_insurance_needs",
-    "calculate_emi", "calculate_prepayment_impact",
-    "calculate_credit_card_payoff", "get_loans",
+    "read_web_page",
 ]
 
 
