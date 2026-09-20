@@ -41,6 +41,9 @@ _IDENTITY_FIELDS = frozenset({
 _MAX_METADATA_STRING = 500
 _SUSPICIOUS_VALUE = re.compile(r"(?:api[_ -]?key|private[_ -]?key|secret|password|authorization|access[_ -]?token|refresh[_ -]?token|account[_ -]?(?:number|no|id))|\b\d{8,}\b", re.IGNORECASE)
 _RAW_FIELDS = frozenset({"result", "raw", "output", "response", "toolresult", "tooloutput"})
+_KNOWN_CITATION_SOURCES = frozenset({"holdings", "goals", "fire-engine", "networth-engine", "transactions", "MANUAL", "Firecrawl", "Upstox", "mfapi"})
+_KNOWN_CITATION_DOMAINS = frozenset({"rbi.org.in", "sebi.gov.in", "incometax.gov.in", "amfiindia.com", "upstox.com", "mfapi.in"})
+_RAW_MARKERS = re.compile(r"\b(?:tool|output|result|holding|allocation|response|raw)\b", re.IGNORECASE)
 _ACTION_FIELDS = {
     "profile": {"name", "date_of_birth", "base_currency", "monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "declared_net_worth_paise", "cash_balance_paise", "emergency_fund_target_months", "risk_profile", "risk_score", "investment_horizon_years", "strategy_goal", "dependents_count", "employment_type", "city_tier", "onboarded"},
     "dashboard_financials": {"monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "cash_balance_paise", "declared_net_worth_paise"},
@@ -91,7 +94,7 @@ def _assert_safe_metadata(value: Any) -> None:
         raise ValueError("metadata value has an unsupported type")
 
 
-def _validate_action_payload(entity: str, payload: dict) -> dict:
+def _validate_action_payload(entity: str, payload: dict, *, allow_name: bool = False) -> dict:
     if any(not isinstance(key, str) or key not in _ACTION_FIELDS[entity] for key in payload):
         raise ValueError("unsupported proposal payload field")
     if any(isinstance(value, (dict, list)) for value in payload.values()):
@@ -118,6 +121,8 @@ def _validate_action_payload(entity: str, payload: dict) -> dict:
                 raise ValueError("proposal date must be ISO formatted")
         else:
             _safe_string(value, field=key)
+            if key == "name" and not allow_name:
+                raise ValueError("free-text action names require the current user message")
     return payload
 
 
@@ -139,15 +144,20 @@ def record_citation(source: str, as_of: str, title: str | None = None,
                     *, domain: str | None = None, url: str | None = None) -> dict:
     """Build a citation without retaining a raw tool response or account data."""
     source = _safe_string(source, field="source")
+    if source not in _KNOWN_CITATION_SOURCES:
+        raise ValueError("unknown citation source")
     as_of = _safe_string(as_of, field="as_of")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T[^\s]{1,30})?", as_of):
         raise ValueError("citation date must be ISO formatted")
     result = {"source": source, "as_of": as_of}
     if title is not None:
-        result["title"] = _safe_string(title, field="title")
+        title = _safe_string(title, field="title")
+        if _RAW_MARKERS.search(title):
+            raise ValueError("citation title contains raw-output markers")
+        result["title"] = title
     if domain is not None:
         domain = _safe_string(domain, field="domain")
-        if not re.fullmatch(r"[A-Za-z0-9.-]{1,100}", domain) or "." not in domain:
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,100}", domain) or "." not in domain or domain.lower() not in _KNOWN_CITATION_DOMAINS:
             raise ValueError("citation domain is invalid")
         result["domain"] = domain.lower()
     if url is not None:
@@ -159,9 +169,9 @@ def record_citation(source: str, as_of: str, title: str | None = None,
     return result
 
 
-@tool
-def propose_action(entity: str, operation: str, *, target: str | None = None,
-                   payload: dict | None = None) -> dict:
+def _validate_proposal(entity: str, operation: str, *, target: str | None = None,
+                       payload: dict | None = None, current_message: str | None = None,
+                       require_user_text: bool = True) -> dict:
     """Validate a proposal; proposals are metadata only and are never persisted as writes."""
     if entity not in SAFE_ACTION_ENTITIES:
         raise ValueError("unsupported action entity")
@@ -176,7 +186,11 @@ def propose_action(entity: str, operation: str, *, target: str | None = None,
     if target is not None:
         target = _safe_string(target, field="target")
     if payload is not None:
-        _validate_action_payload(entity, payload)
+        if "name" in payload and require_user_text:
+            name = payload["name"]
+            if not isinstance(current_message, str) or not current_message.strip() or name.casefold() not in current_message.casefold():
+                raise ValueError("free-text action name is not from the current user message")
+        _validate_action_payload(entity, payload, allow_name=not require_user_text or "name" in payload)
         _assert_safe_metadata(payload)
     result = {"entity": entity, "operation": operation}
     if target is not None:
@@ -185,6 +199,23 @@ def propose_action(entity: str, operation: str, *, target: str | None = None,
         result["payload"] = payload
     _assert_safe_metadata(result)
     return result
+
+
+@tool(context=True)
+def propose_action(entity: str, operation: str, *, target: str | None = None,
+                   payload: dict | None = None, current_message: str | None = None,
+                   tool_context=None) -> dict:
+    if current_message is None and tool_context is not None:
+        current_message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
+    return _validate_proposal(entity, operation, target=target, payload=payload,
+                              current_message=current_message, require_user_text=True)
+
+
+def validate_stored_action(entity: str, operation: str, *, target: str | None = None,
+                           payload: dict | None = None) -> dict:
+    """Revalidate persisted metadata without treating storage as a user turn."""
+    return _validate_proposal(entity, operation, target=target, payload=payload,
+                              require_user_text=False)
 
 
 class ToolCapExceeded(Exception):

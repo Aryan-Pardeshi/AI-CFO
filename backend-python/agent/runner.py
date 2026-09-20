@@ -330,7 +330,8 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
             stream = agent.stream_async(
                 _strands_messages(history, message),
                 invocation_state={"user_id": user_id, "tracker": tracker,
-                                  "history": history, "metadata": metadata},
+                                  "history": history, "metadata": metadata,
+                                  "message": message},
             )
         except TypeError:
             stream = agent.stream_async(_strands_messages(history, message))
@@ -364,7 +365,8 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
                 if isinstance(action, dict):
                     try:
                         item = tools_mod.propose_action(action.get("entity"), action.get("operation"),
-                                                        target=action.get("target"), payload=action.get("payload"))
+                                                        target=action.get("target"), payload=action.get("payload"),
+                                                        current_message=message)
                         if item not in metadata["proposed_actions"]:
                             metadata["proposed_actions"].append(item)
                     except (TypeError, ValueError):

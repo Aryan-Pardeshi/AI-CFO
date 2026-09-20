@@ -145,7 +145,7 @@ def test_real_tool_result_is_saved_as_citation_and_model_proposal_is_saved():
     jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
                                        "status": "QUEUED", "conversation_id": "c1"}
     job = runner_mod.run_chat_job(
-        _payload(), deps={"jobs_table": jobs, "conv_table": conv, "agent": AgentWithMetadata(),
+        {**_payload(), "message": "Please create a car goal"}, deps={"jobs_table": jobs, "conv_table": conv, "agent": AgentWithMetadata(),
                           "tracker": tools_mod.ToolCallTracker(), "publisher": lambda *a, **k: True},
     )
     assert job["citations"] == [{"source": "holdings", "as_of": "2026-09-20"}]

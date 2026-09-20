@@ -47,15 +47,25 @@ def test_proposals_use_entity_specific_api_fields_and_reject_secret_phrases():
 
     valid = tools.propose_action(
         "goal", "create", payload={"name": "Car", "goal_type": "CAR",
-                                      "amount_today_paise": 5000000, "target_age": 35}
+                                      "amount_today_paise": 5000000, "target_age": 35},
+        current_message="Please create a Car goal at age 35"
     )
     assert valid["payload"]["target_age"] == 35
     with pytest.raises(ValueError):
         tools.propose_action("goal", "create", payload={"api_key": "abc"})
     with pytest.raises(ValueError):
-        tools.propose_action("goal", "create", payload={"name": "my secret is abc"})
+        tools.propose_action("goal", "create", payload={"name": "my secret is abc"}, current_message="create a goal")
     with pytest.raises(ValueError):
-        tools.propose_action("goal", "create", payload={"note": "complete tool output: holdings"})
+        tools.propose_action("goal", "create", payload={"note": "complete tool output: holdings"}, current_message="create a goal")
+
+
+def test_free_text_action_names_must_come_from_current_user_message():
+    from agent import tools
+
+    with pytest.raises(ValueError):
+        tools.propose_action("goal", "create", payload={"name": "Car"}, current_message="create a Wedding goal")
+    valid = tools.propose_action("goal", "create", payload={"name": "Wedding"}, current_message="create a Wedding goal")
+    assert valid["payload"]["name"] == "Wedding"
 
 
 def test_citations_allow_safe_firecrawl_fields_but_reject_raw_labels():
@@ -70,3 +80,5 @@ def test_citations_allow_safe_firecrawl_fields_but_reject_raw_labels():
         tools.record_citation("my secret is abc", "2026-09-20")
     with pytest.raises(ValueError):
         tools.record_citation("api_key", "2026-09-20")
+    with pytest.raises(ValueError):
+        tools.record_citation("Firecrawl", "2026-09-20", title="complete tool output holdings allocation")
