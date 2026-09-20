@@ -313,6 +313,20 @@ def test_imperative_edit_still_routes_to_proposal():
     assert "propose_*" in latest
 
 
+def test_conversational_edit_request_routes_to_proposal():
+    from agent import runner as runner_mod
+
+    latest = runner_mod._strands_messages([], "Can you update my loan balance to 400000?")[-1]["content"][0]["text"]
+    assert "propose_*" in latest
+
+
+def test_i_want_edit_request_routes_to_proposal():
+    from agent import runner as runner_mod
+
+    latest = runner_mod._strands_messages([], "I want to update my income to 100000")[-1]["content"][0]["text"]
+    assert "propose_*" in latest
+
+
 def test_run_completes_even_if_publish_fails():
     from agent import runner as runner_mod
     from agent import tools as tools_mod

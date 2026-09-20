@@ -107,7 +107,12 @@ def _latest_turn_instruction(message: str) -> str:
         r"^(?:please\s+)?(?:update|change|edit|set|create|save|delete|remove)\b",
         normalized.strip(),
     )
-    if edit_request and not normalized.rstrip().endswith("?"):
+    conversational_edit = re.match(
+        r"^(?:can you|could you|would you|i want to|i'd like to)\s+(?:please\s+)?"
+        r"(?:update|change|edit|set|create|save|delete|remove)\b",
+        normalized.strip(),
+    )
+    if (edit_request and not normalized.rstrip().endswith("?")) or conversational_edit:
         return (
             "LATEST REQUEST ROUTING: This is an action request. Call the relevant "
             "propose_* tool to create a validated preview; never write to the database."

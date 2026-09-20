@@ -57,3 +57,13 @@ request (and rejects question-form input).
 
 Focused runner tests: `18 passed`.
 Full backend suite: `198 passed`.
+
+## Fix round 3 TDD evidence
+
+Added regressions for conversational explicit edits (`Can you update...` and `I want to
+update...`). RED initially routed both to calculator/cashflow reads. Routing now recognizes
+only explicit edit verbs in imperative or tightly bounded conversational request prefixes;
+passive/historical change wording remains a read query.
+
+Focused runner tests: `20 passed`.
+Full backend suite: `200 passed`.
