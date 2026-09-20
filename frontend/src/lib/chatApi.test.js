@@ -256,7 +256,7 @@ describe('chat metadata normalization', () => {
       status: 'RUNNING',
       tool_activity: [{ tool: 'get_fire', status: 'started' }, { tool: '<script>' }],
       citations: [{ title: 'Official source', url: 'https://example.com/source', as_of: '2026-09-20' }, { title: 'bad', url: 'javascript:alert(1)' }],
-      proposed_actions: [{ entity: 'fire_scenario', operation: 'create', target: 'scenario-1', payload: { target_age: 50 }, summary: 'Save FIRE scenario', expires_at: '2026-09-20T11:00:00Z' }],
+      proposed_actions: [{ entity: 'fire_scenario', operation: 'create', target: 'scenario-1', payload: { target_age: 50 }, summary: 'Save FIRE scenario', expires_at: '2099-09-20T11:00:00Z' }],
     });
     expect(job.tool_activity).toHaveLength(1);
     expect(job.citations).toEqual([{ title: 'Official source', url: 'https://example.com/source', as_of: '2026-09-20' }]);

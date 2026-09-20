@@ -4,7 +4,7 @@
 import React from 'react';
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../context/AuthContext', () => ({
@@ -43,3 +43,61 @@ describe('Overview dashboard FIRE entry', () => {
     expect(action.getAttribute('href')).toBe('/fire');
   });
 });
+
+describe('Overview dashboard Category Allocation legend', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  test('renders responsive legend list below the donut chart with accessible markup', async () => {
+    render(
+      <MemoryRouter>
+        <Overview />
+      </MemoryRouter>,
+    );
+
+    const legendList = await screen.findByRole('list', { name: /category allocation legend/i });
+    expect(legendList).toBeInTheDocument();
+
+    const listItems = within(legendList).getAllByRole('listitem');
+    expect(listItems).toHaveLength(2);
+  });
+
+  test('displays category name, rupee amount, and percentage dynamically for each item', async () => {
+    render(
+      <MemoryRouter>
+        <Overview />
+      </MemoryRouter>,
+    );
+
+    const legendList = await screen.findByRole('list', { name: /category allocation legend/i });
+    const listItems = within(legendList).getAllByRole('listitem');
+
+    // First item: HOUSING (₹25,000, 62.5%)
+    expect(within(listItems[0]).getByText('HOUSING')).toBeInTheDocument();
+    expect(within(listItems[0]).getByText('₹25,000')).toBeInTheDocument();
+    expect(within(listItems[0]).getByText('62.5%')).toBeInTheDocument();
+
+    // Second item: FOOD (₹15,000, 37.5%)
+    expect(within(listItems[1]).getByText('FOOD')).toBeInTheDocument();
+    expect(within(listItems[1]).getByText('₹15,000')).toBeInTheDocument();
+    expect(within(listItems[1]).getByText('37.5%')).toBeInTheDocument();
+  });
+
+  test('displays matching color swatches with accessible labels for screen readers', async () => {
+    render(
+      <MemoryRouter>
+        <Overview />
+      </MemoryRouter>,
+    );
+
+    const housingSwatch = await screen.findByLabelText(/housing color/i);
+    expect(housingSwatch).toBeInTheDocument();
+    expect(housingSwatch).toHaveStyle({ backgroundColor: '#059669' });
+
+    const foodSwatch = await screen.findByLabelText(/food color/i);
+    expect(foodSwatch).toBeInTheDocument();
+    expect(foodSwatch).toHaveStyle({ backgroundColor: '#D97706' });
+  });
+});
+

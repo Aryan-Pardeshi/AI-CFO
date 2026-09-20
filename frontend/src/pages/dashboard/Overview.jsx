@@ -93,6 +93,8 @@ const Overview = () => {
     .map(([name, val]) => ({ name: name.toUpperCase(), value: Number(val) }))
     .sort((a, b) => b.value - a.value);
 
+  const totalExpenseValue = expenseData.reduce((acc, item) => acc + item.value, 0);
+
   // Top liabilities for bar chart
   const liabilityData = Object.entries(liabilities)
     .filter(([_, val]) => Number(val) > 0)
@@ -278,6 +280,101 @@ const Overview = () => {
               </PieChart>
             </ResponsiveContainer>
           </div>
+          {expenseData.length > 0 && (
+            <ul
+              role="list"
+              aria-label="Category allocation legend"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))',
+                gap: '0.75rem',
+                marginTop: '1.5rem',
+                padding: 0,
+                listStyle: 'none',
+              }}
+            >
+              {expenseData.map((entry, index) => {
+                const color = COLORS[index % COLORS.length];
+                const percentage = totalExpenseValue > 0 ? (entry.value / totalExpenseValue) * 100 : 0;
+                const formattedPercentage = percentage % 1 === 0 ? `${percentage.toFixed(0)}%` : `${percentage.toFixed(1)}%`;
+
+                return (
+                  <li
+                    key={entry.name}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.35rem',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: 'var(--radius-md, 12px)',
+                      background: 'var(--surface-muted)',
+                      border: '1px solid var(--border-color)',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                      <span
+                        role="img"
+                        aria-label={`${entry.name} color swatch`}
+                        title={`${entry.name} color`}
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: color,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        title={entry.name}
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          color: 'var(--text-secondary)',
+                          letterSpacing: '0.5px',
+                          textTransform: 'uppercase',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {entry.name}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        justifyContent: 'space-between',
+                        gap: '0.5rem',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '0.95rem',
+                          fontWeight: 700,
+                          color: 'var(--text-primary)',
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        ₹{entry.value.toLocaleString('en-IN')}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        {formattedPercentage}
+                      </span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
         
         {/* Cashflow Velocity */}

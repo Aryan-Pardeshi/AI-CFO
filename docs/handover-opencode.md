@@ -1,548 +1,287 @@
-# AI-CFO handover for opencode
+# AI-CFO current handover
 
-Written 2026-09-19 (Saturday of the hackathon) by Claude Code at the end of its session, so Aryan can keep
-building with opencode while his Claude weekly limit recovers. Everything Claude knows that is not obvious
-from the code is in here. Read it top to bottom once, then use the section headings as a reference.
+Updated **20 September 2026** after the current `main` release was verified locally, in AWS, and on the public
+Amplify site. This file is the current status source for any coding agent. Older notes from the 19 September
+handover have been removed rather than left as conflicting instructions.
 
-Reader: you are opencode (or any coding agent) working directly with Aryan. Aryan reviews what you do.
-There is no second Claude reviewing your output any more, so section 12 (verification) is now your job.
+## 0. Release snapshot
 
----
+- Repository: `C:\Users\admin\Desktop\Aryan\PROJECTS\Personal_AI_CFO`
+- GitHub: `Aryan-Pardeshi/AI-CFO`
+- Release commit: `2ce4fa1dbf787f5afab21fb13ef4e4bd41e701a4` (`merge: integrate ARIA v2 and security explorer`)
+- Branch: `main`; `origin/main` points to the same release.
+- AWS account: `096194660743`; region: `ap-south-1`; CLI profile: `default`.
+- Backend stack: `aicfo-dev`, status `UPDATE_COMPLETE`.
+- Backend API: `https://jf74379uak.execute-api.ap-south-1.amazonaws.com`
+- Cognito pool: `ap-south-1_5oinzZre7`; app client: `7003dh9lo6s5sigp5f6hkh6bj2`.
+- Amplify app: `aicfo-demo-frontend`; app id `d19guqu2l1q2px`.
+- Public frontend: `https://main.d19guqu2l1q2px.amplifyapp.com`
+- Local frontend: `http://localhost:5174`
 
-## 0. Current status — updated 19 September 2026
+The backend deploy completed with no resource replacement. The final changesets modified only Lambda/API/CORS/
+Cognito-client configuration and the S3 CORS configuration; Cognito pool, DynamoDB tables, the data bucket, and
+AppSync identity were preserved.
 
-**This section overrides stale statements later in this document.** The original handover was written before
-the chat, FIRE, demo-data and Kilo work landed.
+The frontend is an Amplify Hosting manual artifact deployment. The deployed Amplify app has:
 
-- AWS stack: `aicfo-dev` in `ap-south-1`, updated successfully at **2026-09-19 15:35 UTC**. The update was
-  in-place only (no Cognito, DynamoDB, S3 or API replacement).
-- The demo user is seeded with a profile, seven holdings, two goals, four loans and **58 transactions across
-  six months**. The transaction loader now includes those rows in ARIA's financial snapshot, so cashflow is
-  no longer silently empty.
-- ARIA chat is live behind `POST /chat`, polling `GET /chat/{job_id}`, and persisted conversations. The runner
-  sends the last ten saved turns plus the current turn to each fresh Lambda agent; it does not rely on
-  Lambda process memory. Each newest turn also carries an explicit live-tool route (cashflow →
-  `get_cashflow_summary`, FIRE → `calculate_fire`, portfolio → `get_portfolio_analysis`, net worth →
-  `get_net_worth`) so an earlier answer cannot hijack a distinct new question.
-- ARIA’s frontend safely renders assistant Markdown: bold values, headings, lists and GitHub-style tables. Raw
-  HTML remains disabled; do not replace this with `dangerouslySetInnerHTML`.
-- Strands emits `data` and `current_tool_use` events. The runner now persists those standard events correctly;
-  the former code listened for non-existent `text_delta` / `tool_end` fields and replaced genuine answers with a
-  generic fallback.
-- Model routing is: **DeepSeek V4 Flash 0731 (free)** → **NVIDIA Nemotron 3 Super 120B (free)** →
-  **Kilo Auto (free)**. Fallback occurs only for an upstream Kilo-provider error, never for a data or tool error.
-  The key stays in Secrets Manager under `aicfo/kilo`; never copy it into source or an environment file.
-- Live smoke checks passed for the demo user: a snapshot chat completed with `get_financial_snapshot`; a follow-up
-  in the same conversation used `calculate_fire` and retained the prior FIRE age. After the routing guard deploy,
-  a fresh chat retrieved all six transaction months with `get_cashflow_summary` (₹3,43,539 total surplus), and its
-  next Lambda invocation accurately recalled that exact surplus from the saved turn. The direct snapshot tool also
-  saw six cashflow months and a non-zero net total.
-- Fresh verification at this point: Python **163 passed**, Node **269 passed**, frontend **140 passed**,
-  frontend production build succeeded, and `sam validate --lint` succeeded. Frontend lint still has pre-existing
-  warnings in Aviral's files; do not turn those into a broad UI refactor during the hackathon.
-- Working tree when this note was updated contains uncommitted, tested, **deployed** fixes in
-  `backend-python/agent/prompt.py`, `backend-python/agent/runner.py`, `backend-python/handlers/finance.py`, and
-  their two test files, plus the tested local-frontend Markdown rendering changes in `frontend/`. Do not reset or
-  discard them. Aryan has not asked to commit or push them yet.
-- Onboarding step 3 now accepts only CSV bank statements through the authenticated upload/process flow; users review
-  and correct every row before an explicit commit, with no transaction or autofill before successful commit. Autofill
-  uses the newest calendar month, excludes EMI/TRANSFER, sends INVESTMENTS only to monthly investment, and uses the
-  latest balance by date then API row order. Insurance remains manual (there is no insurance category).
-- Onboarding step 4 accepts a direct broker **holdings CSV** locally (not through an LLM or the bank-statement API).
-  It requires symbol, quantity, and average-price columns; the user reviews editable rows and presses Continue before
-  any holding is created as `IMPORTED`. Funds ledgers and tradebooks are intentionally rejected because they cannot
-  establish current quantities. `docs/examples/sample-broker-holdings-september-2026.csv` is a synthetic supported
-  fixture; `sample-broker-funds-ledger-september-2026.csv` is intentionally unsupported. PDF/image/XLSX support
-  remains out of scope.
+- Vite production output from `frontend/dist`.
+- Hosted `VITE_*` configuration pointing to the deployed API and Cognito.
+- SPA rewrite that sends client routes to `/index.html` while preserving `.js`, `.css`, images, fonts, and maps.
+- CORS and Cognito callback allowlists containing the Amplify URL and both local ports.
 
----
+The Amplify app is **not connected to GitHub auto-build** because no GitHub OAuth token is configured. This does not
+affect the current public deployment; future releases must be uploaded manually or connected through Amplify once a
+GitHub OAuth connection is available.
 
-## 1. TL;DR
+## 1. Checklist: completed
 
-- Repo: `C:\Users\admin\Desktop\Aryan\PROJECTS\Personal_AI_CFO` (Windows 11, Git Bash and PowerShell both available).
-  GitHub: `Aryan-Pardeshi/AI-CFO`. Branch `main`, at commit `014b57c`, **pushed** (origin/main == main).
-- 2026-09-19 we merged Aviral's v2 dashboard, News, Balance Sheet (holdings) and Milestones pages into main and
-  built a real, authenticated AWS backend for them. Node 269/269, Python 91 (+34 unreviewed draft tests),
-  frontend 80/80, `sam validate --lint` clean. Backend is deployed to the `aicfo-dev` stack.
-- Our guided 8-step onboarding is the entry flow. Step 3 has the reviewed bank-statement CSV flow; step 4 has a
-  locally parsed, reviewed broker-holdings CSV flow. Neither writes data until the user completes its explicit
-  confirmation action.
-- Built since this handover: the async ARIA chat agent, persisted conversation polling, dashboard FIRE flow,
-  and demo-user portfolio/goal/loan/transaction seed. Upstox, frontend hosting, mutual-fund pricing and richer
-  securities search remain separate work.
-- Hackathon runs Thu 17 to Sun 20 Sept 2026. Submission deadline was unpublished when the docs were written.
-  Rule from `.agents/hackathon.md`: submit at least 3 hours before the deadline, aim for a rough submission
-  Saturday night. Check `docs/submission.md` and `.agents/hackathon.md` before doing anything submission related.
+### Product and onboarding
 
----
+- Landing page, registration, confirmation, Cognito login, and protected routes.
+- Try the Demo login path using the gitignored `frontend/.env.local` values. Never copy demo credentials into code,
+  docs, commits, or chat.
+- Eight-step onboarding with risk/strategy survey, including investment horizon, loss reaction, income stability,
+  investing experience, and risk profile.
+- Bank statement CSV upload → parse → validate → editable review → explicit commit.
+- Bank CSV autofill uses the newest calendar month, excludes EMI/TRANSFER rows from investment totals, maps
+  INVESTMENTS to monthly investment, and takes the latest balance by date and source-row order.
+- Broker holdings CSV upload is local and deterministic. It requires symbol, quantity, and average price; rows are
+  editable and no holding is created until the user presses Continue. Imported holdings are marked `IMPORTED`.
+- Broker funds ledgers/tradebooks are rejected because they cannot reliably reconstruct current positions.
+- Supported sample: `docs/examples/sample-broker-holdings-september-2026.csv`.
+- PDF, image, and XLSX statement extraction is intentionally outside the submission scope.
 
-## 2. People and ownership
+### Dashboard and finance
 
-| Person | Role | Notes |
-| --- | --- | --- |
-| Aryan Pardeshi | Owner, deploys everything | Python, DynamoDB, portfolio maths, FIRE, agent layer. Only he deploys (`sam deploy`), because teammates have PowerUser and cannot create IAM roles. |
-| Aviral (`mishraaviral7002 <aviralmishra7002@gmail.com>`) | Frontend | Owns `frontend/` and `feat/dashboard-ui`. Does not use Claude Code. He wrote the v2 dashboard pages. He was genuinely hurt once when his multi-file structure was collapsed into one big file (see section 3). |
-| Sivsri | Statements/onboarding, and now Upstox with Ram | Owns `feat/statements-onboarding` on paper, but Aryan and Claude built the statements Level 1 in `backend-python/statements/`. |
-| Ram | Calculators/seed, and now Upstox with Sivsri | Capability uncertain. Both he and Sivsri are fully occupied with Upstox live graphs, so calculators and statements fell to Aryan. |
+- Overview dashboard with canonical profile, income, expense, cash, loan, holding, and transaction data.
+- FIRE page at `/fire`, dashboard FIRE card/button, baseline forecast, current runway, goal-impact scenario, and
+  scenario creation with explicit validation.
+- Net-worth view and projection.
+- Investments/Balance Sheet view with holdings, allocation, P&L, history, and concentration warning.
+- Security explorer and security detail pages for search, overview, history/risk, news, and portfolio-fit context.
+- News page with market tiles, provider/source metadata, dated headlines, and hedged personalized ideas.
+- Goals, loans, milestones, monthly tracker, and transaction-category review flows.
+- Demo user seeded with profile, seven holdings, two goals, four loans, and 58 transactions over six months.
 
-Teammates are mostly unavailable this weekend. Assume Aryan plus his AI tools carry the build.
+### ARIA
 
-Aryan's communication style: short, casual, fast. He says "push it" when he wants a push and "pls ..." for tasks.
-He does not want long explanations; give a plain summary of what changed and what you verified.
+- Page and product language is **ARIA**, not “ARIA Advisory”.
+- Async `POST /chat` job creation with polling through `GET /chat/{job_id}`.
+- Durable conversation history in DynamoDB; each new Lambda invocation receives the recent saved turns plus the
+  current user message.
+- Fresh-topic routing: cashflow uses cashflow tools, FIRE uses FIRE tools, portfolio uses portfolio tools, and
+  net-worth uses net-worth tools instead of blindly reusing an old answer.
+- Safe Markdown rendering for bold values, headings, lists, tables, and citations. Raw HTML remains disabled.
+- User-visible ARIA activity trace with tool name/status/source/time and citations; hidden chain-of-thought is never
+  exposed.
+- Proposed edit cards with field-level review and Confirm/Cancel. The model can prepare a validated proposal but
+  never writes directly and never receives a trusted user id.
+- Conversation retention verified with the demo cashflow answer (₹3,43,539 surplus) and a follow-up FIRE question.
+- Kilo model chain is active in this order:
+  1. `deepseek/deepseek-v4-flash-0731:free`
+  2. `nvidia/nemotron-3-super-120b-a12b:free`
+  3. `kilo-auto/free`
+- Fallback is restricted to upstream provider failures. Data/tool failures are shown as limitations and never turned
+  into invented financial values.
+- Firecrawl adapter and hostile-content safety tests exist. Firecrawl is exposed to the agent only when its secret is
+  available, with bounded searches/reads, URL validation, dated citations, and prompt-injection quarantine.
 
----
+## 2. Checklist: not complete or intentionally deferred
 
-## 3. Standing rules (do not break these)
+- Direct calculator HTTP routes/UI: tax, capital gains, insurance, credit-card payoff, EMI, prepayment impact, and
+  short-term fit are represented in the contract and agent tool layer, but the direct Python HTTP routes are not in
+  the live route set for this release.
+- Mutual-fund NAV adapter and agent tools exist through `mfapi.in`; the dashboard still cannot show a live MF NAV in
+  every holdings view, so unavailable values must remain unavailable rather than fabricated.
+- A full live Firecrawl call and final hostile-page smoke run were not part of the public deployment check; unit and
+  contract safety coverage exists.
+- AppSync Events publishing is configured; browser subscribe/streaming is not the required path. Polling is the
+  working ARIA UI fallback.
+- PDF/image/XLSX statement extraction is deferred.
+- AI-generated news digest on top of deterministic personalized ideas is deferred.
+- GitHub-connected Amplify auto-build is optional follow-up work.
+- Known rough edges: Yahoo requests are uncached; ETF news can be generic; existing Aviral-owned frontend lint
+  warnings are non-blocking. Do not broaden scope during submission work.
 
-These came from `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md` and from Aryan directly. Some are repeated in
-those files; the ones marked (Aryan) are things he told Claude in chat and are not written anywhere else.
+## 3. Architecture and safety rules
 
-Product and code rules
-1. **Money is integer paise** in DynamoDB and canonical API fields. Rates are decimal fractions (0.07, not 7).
-   Field names are `snake_case`. DynamoDB returns `Decimal`; convert at the boundary (`plain_numbers` in Python,
-   the Node models do the equivalent).
-2. **Identity comes only from the verified Cognito `sub`** (JWT claim in the API Gateway authorizer context).
-   Never read a user id from the body, query string, path or email.
-3. **Numbers first, AI second.** No model improvises financial maths. Pure tested Python in `backend-python/finance/`.
-   Finance code is test-first (TDD): read `.agents/finance-rules.md` for every locked formula and the FIRE
-   regression fixture (age 17, fire_age 31, corpus 567,067,826 paise, conservative age 35, wdr 4.78%).
-4. **Never commit secrets** (no `.env`, no keys, no AWS creds). Secrets Manager only. `frontend/.env.local` is
-   gitignored and must stay that way.
-5. **Contract first**: `contracts/openapi.yaml` is the machine source of truth, `.agents/api-contract.md` is the
-   prose version. Shared files (`openapi.yaml`, `infra/template.yaml`, `AGENTS.md`) change in small, separate
-   commits. If you change a route or response shape, update both contract files in the same change.
-6. **Do not silently redesign a locked decision** in `.agents/`. If one has to change, say why and ask Aryan.
-7. Recommendations and news personalisation must be **hedged and educational**, never buy/sell advice, never
-   promise returns. This is also the safe wording rule in `.agents/agent-guide.md`.
+```text
+Browser
+  ↓
+AWS Amplify Hosting (React + Vite SPA)
+  ↓ Cognito JWT
+API Gateway HTTP API
+  ├─ Node CrudFunction → DynamoDB CRUD/profile/dashboard/market feed
+  └─ Python FinanceFunction → deterministic finance, FIRE, statements, security routes, chat dispatch
+       ↓ async invoke
+     Python AgentFunction → DynamoDB chat jobs/conversations → Kilo gateway / Firecrawl / external adapters
+```
 
-Team and git rules
-8. **Preserve teammates' file structure.** When you rework code Aviral (or anyone) wrote, keep their folder
-   layout, file-per-concern split and naming. Never merge a multi-file layout into one big file. Change what
-   the code does, not how it is organised. Look at their original commit (`git show <hash>`), not just the tip.
-9. **Frontend is Aviral's.** Do not scaffold, redesign or restyle his pages. Allowed exceptions Aryan granted:
-   our 8-step onboarding (`frontend/src/pages/Onboarding.jsx` and `frontend/src/pages/onboarding/`) is ours, and
-   the auth/data plumbing on his dashboard pages. For anything else in `frontend/`, ask Aryan first.
-10. **Credit Aviral** when a change builds on or restores his code: use a `Co-authored-by: mishraaviral7002
-    <aviralmishra7002@gmail.com>` trailer. That is a human credit and is fine.
-11. **No AI attribution lines** in commit messages or PR descriptions (no "Generated with...", no "Co-Authored-By: Claude/AI").
-12. **Git history must sit inside the event window (17 to 20 Sept 2026).** Do not backdate, and do not import
-    pre-event history. (`.agents/hackathon.md` explains why; breaking it can disqualify the team.)
-13. **Push only work that is verified and only when Aryan says so** ("push it"). (Aryan) His standing bar when
-    he is away: push only what you are 100 percent sure is perfect and that you exercised for real. Never
-    force-push, never rewrite pushed history, never touch teammates' branches (`aviral-onboarding-process`,
-    `origin/aviral-onboarding-v2`).
-14. **Deploy only to `aicfo-dev`, never create a new stack**, and always inspect the changeset for
-    `Replacement` / `RequiresRecreation` before executing it (runbook in section 9).
-15. **Never type real credentials or secrets anywhere** (login forms, `.env`, chat). The "Try the Demo" button
-    on `/login` signs the demo user in using values from `frontend/.env.local`; use the button, do not copy
-    the values out.
+- DynamoDB money fields are integer paise. Convert to rupees only at API/UI boundaries.
+- Rates are decimal fractions (`0.07`, not `7`).
+- User identity comes only from the verified Cognito JWT `sub`; never trust a client `user_id`.
+- Pure financial math lives in tested Python finance modules. The model explains tool results; it does not calculate
+  financial numbers from prose.
+- Market values must include source/as-of information or remain unavailable.
+- Advice is educational and hedged. No guaranteed returns, no autonomous trading, no unconditional buy/sell advice,
+  and no claim of SEBI registration.
+- No secrets in Git, frontend source, `.env` files, logs, prompts, or chat. Secrets Manager holds `aicfo/kilo`,
+  `aicfo/upstox`, `aicfo/firecrawl`, and related provider secrets.
+- Never silently delete, overwrite, or save a proposed ARIA action. Confirmed writes go through authenticated CRUD
+  routes with server-side ownership and stale-record validation.
 
----
+## 4. Deployed AWS facts
 
-## 4. Environment and tooling
+- Stack: `aicfo-dev` in `ap-south-1`.
+- API Gateway HTTP API: `https://jf74379uak.execute-api.ap-south-1.amazonaws.com`.
+- Cognito hosted domain: `aicfo-dev-096194660743.auth.ap-south-1.amazoncognito.com`.
+- Data bucket: `aicfo-dev-data-096194660743` (private; used for statement uploads/presigned URLs).
+- AppSync Events API id: `5ysz74ejczhfvd5jgnvn3mb3mu`.
+- AppSync HTTP host: `fkhfh7dywfff7kwqslflz5ygzq.appsync-api.ap-south-1.amazonaws.com`.
+- AppSync realtime host: `fkhfh7dywfff7kwqslflz5ygzq.appsync-realtime-api.ap-south-1.amazonaws.com`.
+- Lambda functions: `CrudFunction` (Node 22), `FinanceFunction` (Python 3.13), `AgentFunction` (Python 3.13).
+- Bedrock is not the live provider because this AWS account/plan blocks the required inference path. Kilo Gateway is
+  the configured provider; do not change provider routing without a verified replacement and tests.
 
-- OS Windows 11. Shell: Git Bash (POSIX) or PowerShell 7. Paths with spaces need quotes.
-- Node v24.19.0 locally (Lambda runtime is `nodejs22.x`, engines `>=22`). Python: default `python` is 3.14.7 but
-  the Lambda runtime is `python3.13`, so use **`py -3.13 -m pytest`**. SAM CLI 1.166.2. opencode 1.18.31.
-- AWS CLI profile `default`, region `ap-south-1`, account `096194660743`. (There is no profile called `aicfo`.)
-- Dev frontend server: `main-frontend` in `.claude/launch.json` runs Vite on port **5174** with `--strictPort`.
-  Manual form: `npm --prefix frontend run dev -- --port 5174 --strictPort`. Only `http://localhost:5173` and
-  `http://localhost:5174` are allowed origins/OAuth callbacks (stack parameters `FrontendOrigins` and
-  `FrontendCallbackUrls`). Any other port or host breaks CORS and Google/Hosted UI login until the stack
-  parameters are changed and redeployed.
-- Git Bash traps that cost time today:
-  - Apostrophes inside heredocs (`<<'EOF'` is fine, but an apostrophe in a `bash -c` string breaks it). For anything
-    non-trivial write a script to a file and run it.
-  - `git -c user.name=$NAME` word-splits an unquoted variable; quote it.
-  - A recursive `grep -rn` that includes `node_modules` will hang; scope it to `src/` or `tests/`.
-- Text encoding: write files with `newline="\n"` from Python scripts to avoid CRLF noise in diffs.
+## 5. Live API surface
 
----
+### Node CrudFunction
 
-## 5. Deployed AWS facts (`aicfo-dev`, ap-south-1)
+Authenticated routes include:
 
-Also in `.claude/CLAUDE.md` (checked in).
+- `GET /me`, `PUT /me/profile`
+- `GET|POST /holdings`, `PUT|DELETE /holdings/{holding_id}`
+- `GET|POST /goals`, `PUT|DELETE /goals/{goal_id}`
+- `GET|POST /loans`, `PUT|DELETE /loans/{loan_id}`
+- `GET /dashboard/profile`, `PUT /dashboard/financials`
+- `GET /portfolio/prices`, `/portfolio/news`, `/portfolio/historical`, `/portfolio/suggestions`
 
-- API base: `https://jf74379uak.execute-api.ap-south-1.amazonaws.com` (HTTP API, Cognito JWT authorizer).
-- Cognito user pool `ap-south-1_5oinzZre7`, app client `7003dh9lo6s5sigp5f6hkh6bj2`.
-  Hosted UI domain `aicfo-dev-096194660743.auth.ap-south-1.amazoncognito.com`. Google sign-in works.
-- Data bucket `aicfo-dev-data-096194660743` (S3, CORS allows PUT/HEAD from the frontend origins, used for statement
-  uploads via presigned PUT).
-- AppSync Events: API `5ysz74ejczhfvd5jgnvn3mb3mu`, realtime host
-  `fkhfh7dywfff7kwqslflz5ygzq.appsync-realtime-api.ap-south-1.amazonaws.com`. IAM publish verified. A real
-  Cognito-signed-in **subscribe** test has never been done, only evaluate-code isolation checks.
-- DynamoDB tables (all in the template): Users, Holdings, Goals, Loans, FireScenarios, Transactions,
-  StatementJobs, Snapshots, Insights, Conversations, ChatJobs.
-- Secrets Manager: `aicfo/upstox`, `aicfo/firecrawl`, `aicfo/kilo`, `aicfo/google`. Aryan pastes real values in the
-  console. `aicfo/upstox` and possibly others may still hold `REPLACE_ME`. Do not go looking for the values.
-- Bedrock is blocked (the account is on the AWS Free plan, which blocks Bedrock inference). Aryan chose to skip the
-  upgrade. **The live chat model route is Kilo AI Gateway** (OpenAI-compatible), in this exact order:
-  `deepseek/deepseek-v4-flash-0731:free`,
-  `nvidia/nemotron-3-super-120b-a12b:free`, then `kilo-auto/free`. The base URL is `KILO_BASE_URL`; the key remains
-  in `aicfo/kilo`. See `.agents/agent-guide.md#kilo-ai-gateway`. The Bedrock IAM policy is parked for a later swap.
-- Three Lambdas:
-  - `CrudFunction`: Node 22, `index.handler`, timeout 20s (raised from 10s for Yahoo fan-out).
-  - `FinanceFunction`: Python 3.13, `handlers.finance.handler`, timeout 15s.
-  - `AgentFunction`: Python 3.13, `handlers.agent.handler`, timeout 300s. Every route still returns 501.
-- Budget alerts `aicfo-monthly-cost` at $10/$25/$50 to aryan.pardeshi@somaiya.edu. AWS credit balance about $140 on the free plan.
+The MVC split is deliberate: router → controller → service → model/validator/provider. Preserve it.
 
----
+### Python FinanceFunction
+
+Currently live:
+
+- `GET /portfolio/analysis`
+- `GET /securities/search`, `/securities/detail`, `/securities/history`, `/securities/fit`
+- `POST /fire/calculate`, `POST /fire/goal-impact`, `POST /fire/scenarios`
+- `GET /net-worth`, `GET /net-worth/projection`
+- `POST /chat`
+- `POST /statements`, `POST /statements/{id}/process`, `GET /statements/{id}`,
+  `POST /statements/{id}/commit`
+- `GET /cashflow/summary`
+- `PATCH /transactions/{id}/category`
+
+The template also contains routes for calculators, EMI, prepayment, and short-term fit, but those return the standard
+not-implemented response until they are added to the live route set and verified.
+
+### Python AgentFunction
+
+- `GET /chat/{job_id}` — user-scoped job status, answer, activity, citations, and proposed actions.
+- `GET /conversations` — user-scoped conversation list.
+- `GET /conversations/{conversation_id}/messages` — user-scoped persisted messages.
+- Async Lambda invocation runs the ARIA job; it is not an HTTP route and must never trust a client identity.
 
 ## 6. Repository map
 
-```
-AGENTS.md / CLAUDE.md / GEMINI.md   entry points; read AGENTS.md's reading order first
-.agents/                            locked decisions: hackathon, project, architecture, api-contract,
-                                    finance-rules, agent-guide, modules (per-module briefs)
-contracts/openapi.yaml              API source of truth
-infra/template.yaml, samconfig.toml SAM stack (stack_name aicfo-dev, ap-south-1)
-backend-node/                       CrudFunction, MVC layout (Aviral's structure, keep it)
-  src/router.js                       regex route table -> controllers
-  src/routes/                         profile, holding, goal, loan, dashboard, portfolio route tables
-  src/controllers/  models/  services/  validators/  providers/  utils/
-  tests/                              node:test + aws-sdk-client-mock; fixtures in tests/fixtures
-backend-python/                     FinanceFunction + AgentFunction
-  finance/                            pure maths: portfolio, returns, risk, fire, networth (verified)
-                                      tax, insurance, creditcard, shortterm (UNTRACKED drafts, see section 11)
-  statements/                         parser, validator, categorizer, dto, summaries, errors
-  handlers/finance.py, agent.py, auth.py
-  agent/ integrations/                empty packages (only __init__.py). Agent and adapters not built.
-  tests/                              pytest; tests/finance and tests/statements
-frontend/                           Vite + React 19 + aws-amplify, vitest, oxlint
-  src/App.jsx                         routes (below)
-  src/pages/                          Login, Register, ConfirmSignUp, Onboarding (our 8 step), OnboardingMethod,
-                                      ManualEntry, CSVUpload (Aviral's, unlinked), Dashboard, dashboard/*
-  src/pages/dashboard/                Overview, BalanceSheet, News, Milestones, Advisory (stub)
-  src/lib/                            dashboardApi, statementsApi, authState, cashflow, valuation, goalMapper,
-                                      money, onboarding, risk (each with a .test.js)
-  src/context/                        AuthContext (Cognito ProtectedRoute), ThemeContext
-  src/data/demoPortfolio.json         mirror of seed/demo-portfolio.json (keep identical)
-seed/                               demo-portfolio.json, fundamentals.json, test-statement.csv, README.md
-docs/                               submission.md, help/, superpowers/plans + specs (see caveat below)
+```text
+AGENTS.md / CLAUDE.md / GEMINI.md       repo rules and reading order
+.agents/                                locked product, finance, API, architecture, and agent rules
+contracts/openapi.yaml                  API contract source of truth
+infra/template.yaml + infra/samconfig.toml  SAM stack aicfo-dev/ap-south-1
+backend-node/                           authenticated CRUD and market-feed Lambda
+backend-python/finance/                 deterministic portfolio/FIRE/net-worth math
+backend-python/statements/              CSV parser, validator, categorizer, review/commit flow
+backend-python/agent/                   Kilo runner, tool registry, safety, persistence, proposals
+backend-python/integrations/            Upstox, mfapi.in, Firecrawl adapters
+frontend/src/App.jsx                    landing/auth/onboarding/dashboard routes
+frontend/src/pages/onboarding/          onboarding and CSV review flow
+frontend/src/pages/dashboard/            overview/FIRE/ARIA/news/investments/security pages
+frontend/src/lib/                       authenticated APIs, chat, FIRE, dashboard and action helpers
+seed/                                   demo portfolio, fundamentals, statement fixtures
+docs/                                   submission and handover material
 ```
 
-Frontend routes (`frontend/src/App.jsx`): public `/` (redirects to `/register`), `/register`, `/confirm`, `/login`;
-protected `/onboarding` (our 8-step), `/onboarding/method`, `/onboarding/manual`, `/onboarding/csv` (Aviral's, unlinked
-from the flow); dashboard shell `/overview`, `/ai-advisory`, `/milestones`, `/balance-sheet`, `/news`; `/dashboard`
-redirects to `/overview`.
+Frontend routes:
 
-Caveat on `docs/superpowers/plans/2026-09-18-aviral-v2-integration.md`: it was the original plan and is partly
-stale. It says "do not change Aviral's rendered JSX" and names `dashboardMapper.js`; the shipped code is
-`dashboardSnapshot.js`, and Aryan later allowed the small changes listed in section 8. Trust the code and this
-handover over the plan.
+`/`, `/register`, `/confirm`, `/login`, `/onboarding`, `/onboarding/method`, `/onboarding/manual`,
+`/onboarding/csv`, `/overview`, `/fire`, `/ai-advisory`, `/monthly-tracker`, `/milestones`, `/balance-sheet`,
+`/news`, `/investments`, `/securities/:instrumentKey`, and `/dashboard` (redirects to `/overview`).
 
----
+## 7. Verification record
 
-## 7. Backend: what exists
+Verified against the release source:
 
-### 7.1 Node CrudFunction routes (all live, all authenticated, all in `infra/template.yaml`)
+| Area | Command/check | Result |
+|---|---|---|
+| Node backend | `cd backend-node && npm test` | 269 passed, 0 failed |
+| Python backend | `cd backend-python && py -3.13 -m pytest -q` | 338 passed |
+| Frontend | `cd frontend && npm test` | 277 passed |
+| Frontend build | `cd frontend && npm run build` | passed |
+| SAM template | `cd infra && sam validate --lint` | valid |
+| SAM build | `cd infra && sam build --cached` | passed |
+| Backend deployment | CloudFormation `aicfo-dev` | `UPDATE_COMPLETE` |
+| Amplify deployment | app `d19guqu2l1q2px`, manual job 3 | `SUCCEED` |
+| Public root | Amplify URL | HTTP 200 |
+| Public SPA routes | `/login`, `/overview`, `/fire`, `/ai-advisory` | HTTP 200 after rewrite fix |
+| API CORS | Amplify origin preflight | HTTP 204 with matching allow-origin |
 
-`GET /me`, `PUT /me/profile`; `GET|POST /holdings`, `PUT|DELETE /holdings/{holding_id}`; `GET|POST /goals`,
-`PUT|DELETE /goals/{goal_id}`; `GET|POST /loans`, `PUT|DELETE /loans/{loan_id}`;
-`GET /dashboard/profile`, `PUT /dashboard/financials`; `GET /portfolio/prices`, `/portfolio/news`,
-`/portfolio/historical`, `/portfolio/suggestions`.
+Before claiming any future change is complete:
 
-Layout: `router.js` matches method + path regex, calls a controller with `{event, userId, body, params}`.
-Controllers are thin; services hold logic; models touch DynamoDB; validators check bodies (paise ints, rate
-fractions, enums). Keep this split.
+1. Read the diff and tests, not only an agent summary.
+2. Run the relevant unit suite and the full release gates when shared/backend/infra files change.
+3. Exercise real deployed data for API work and look at the rendered browser result for UI work.
+4. Check paise/rate units, Cognito-sub ownership, citations/as-of values, hedged wording, and secret leaks.
+5. For `infra/template.yaml` changes, create a non-executed changeset and stop if any protected resource has
+   `Replacement=True` or `RequiresRecreation`.
 
-### 7.2 Dashboard compatibility (`services/dashboardService.js`, `dashboardSnapshot.js`, `dashboardModel.js`)
+## 8. Deployment runbook
 
-Aviral's pages expect a `financials` object and a profile. Our canonical data is paise across the Users/Holdings/Loans tables.
-- `PUT /dashboard/financials` stores his snapshot (idempotent) and also syncs canonical fields.
-- `GET /dashboard/profile` returns `{ user, financials }`. If the user has **no snapshot** (everyone who used our
-  guided onboarding), `snapshotFromCanonical` derives one from canonical data. Mapping:
-  - `incomes.total` from the profile income.
-  - `monthlyExpenses["Living expenses"]` from the profile expenses.
-  - `liquidAssets.bankBalance` from `cash_balance_paise`; `liquidAssets.fixedDeposits` from FD principals.
-  - `liabilities.homeLoanEmi | carLoanEmi | personalLoanEmi | educationLoanEmi | creditCardDebt | otherLoanEmi`
-    = each loan's monthly EMI from the locked reducing-balance formula in `services/emi.js`
-    (`monthlyEmiPaise`). Do not reimplement the formula, and do not "fix" it: it is a locked decision.
-  - `portfolio` from non-FD holdings. Nothing is invented; a value with no source is omitted.
-- `services/marketSymbols.js` `resolveMarketSymbol`: snapshot rows keep their typed ticker; bare NSE stock/ETF
-  symbols get `.NS`; crypto gets `-INR`; funds, FD and cash resolve to `null` (not priceable on Yahoo).
-  `portfolioModel` attaches `marketSymbol` to each row.
-- Interests/preferences live at `snapshot.preferences.{industries, instruments}`, written only by Aviral's
-  `ManualEntry` page today. Our 8-step onboarding does not collect them (open task, section 11).
-
-### 7.3 Market data (`providers/yahooProvider.js`, `googleNewsProvider.js`, `newsProvider.js`, `services/portfolioService.js`)
-
-Yahoo Finance is unofficial. What actually works from Lambda and what does not:
-- **Works, no crumb needed:** `query1.finance.yahoo.com/v8/finance/chart/<SYMBOL>` for quotes and history,
-  including index symbols (`^NSEI`, `^BSESN`, `^GSPC`, `^IXIC`), gold futures `GC=F`, FX `INR=X`, `USDINR=X`.
-- **Empty for Indian tickers:** `v1/finance/search` news. So news is Yahoo first, then a **Google News RSS**
-  fallback (`news.google.com/rss/search?...&hl=en-IN&gl=IN&ceid=IN:en`) for any ticker Yahoo returns nothing for.
-  Query is `"<company name>" stock` (name from the Yahoo quote) else `<BASE> share price`.
-- `safeTicker` only accepts `/^[A-Z0-9][A-Z0-9._^=-]{0,19}$/` plus the four allowlisted `^` indexes
-  (`BENCHMARK_SYMBOLS`). Adding another index symbol means adding it to that set with a test. Silent drops were the
-  bug that hid both benchmark lines before.
-- `TATAMOTORS.NS` is delisted on Yahoo; the candidate list uses `TMPV.NS`.
-- Price semantics: every security price is **rupees**. A non-INR quote is converted with the live `<CUR>INR=X` rate
-  (response carries `originalPrice` and `originalCurrency`) and is dropped when no rate is available. Index levels
-  (`^...`), futures (`...=F`) and FX (`...=X`) stay in native units (they are levels, not rupee prices).
-- Historical ranges: `1W` (5d), `1M`, `3M`, `6M`, `1Y`, and `ALL` (`range=max&interval=1mo`). Portfolio history weights use
-  `row.marketSymbol`; both NIFTY 50 and S&P 500 benchmark lines are returned.
-- **News rules** (`googleNewsProvider.js`): hand-rolled RSS parser, no dependencies. It drops non-https links,
-  items older than 45 days or dated in the future, and price-page titles (regex list `QUOTE_PAGE_TITLES`, e.g.
-  "share price today", "live NSE/BSE"). At most 6 items per query, `summary` is empty and `thumbnail` null,
-  `id` is a 16-char sha1 of the link. It throws `GoogleNewsUpstreamError` only if every query fails.
-  **XML entity decoding was wrong once**: the decoder must decode entities in a single pass, CDATA is taken
-  literally, and `&amp;` must not double-decode. Tests in `google-news-entities.test.js` and the real RSS fixture
-  `tests/fixtures/google-news-rss.xml` cover it. Do not "simplify" it.
-- `getNews` response `source` names the providers that actually contributed ("Yahoo Finance", "Google News", or
-  "Yahoo Finance, Google News"). The internal `provider` tag on each item is stripped before responding.
-- `newsProvider.js` is the composite; `portfolioService.setYahooProvider(yahoo, google)` injects fakes for tests.
-
-### 7.4 Personalised ideas (`services/portfolioService.js` `getSuggestions`, `services/rationale.js`)
-
-`CANDIDATES` is a hand-picked list of 16 (INFY.NS, TATAELXSI.NS, MON100.NS, ADANIGREEN.NS, HDFCBANK.NS,
-SUNPHARMA.NS, HINDUNILVR.NS, DLF.NS, TMPV.NS, HAL.NS, NIFTYBEES.NS, JUNIORBEES.NS, GILT5YBEES.NS, GOLDBEES.NS,
-EMBASSY.NS, BTC-INR), each with `industry`, `instrument`, display labels, `risks`, `riskClass`
-(STEADIER | MIXED | VOLATILE), `assetGroup`, `blurb`, `counterbalance`.
-- Scoring uses saved interests (industry 4 points, instrument 3), the user's `risk_profile`, and what they already hold.
-- `buildRationale` writes up to three hedged sentences: risk balance first ("might balance an aggressive risk
-  profile", "on the steadier side, which might suit a moderate profile"), then interests, then diversification.
-  It never uses buy/sell/return words. When no risk profile is set it does not claim a risk fit (`riskProfile` is
-  null). Tests: `tests/rationale.test.js`.
-- Aryan's original ask: "you have a high risk profile so this mutual fund is large cap, that makes your thing a
-  bit lower risk". Keep that flavour. A later "Level 3" idea is an AI-written digest on top; not built.
-
-### 7.4b Statements pipeline (Python, `backend-python/statements/` + `handlers/finance.py`)
-
-`POST /statements` (create job, presigned S3 PUT url), `POST /statements/{id}/process`, `GET /statements/{id}`,
-`POST /statements/{id}/commit`, `GET /cashflow/summary`. CSV only (Level 1). Design points to preserve:
-- Transaction ids are content addressed: sha256 of the transaction fields plus an occurrence counter,
-  `t_` + 16 hex, so overlapping statements dedupe and committing twice is idempotent.
-- Job creation uses `ConditionExpression="attribute_not_exists(job_id)"` so a job cannot be overwritten.
-- Typed errors: `StatementValidationError`, `StatementNotFoundError`, `StatementConflictError`,
-  `StatementUpstreamError`, each mapped to a 400/404/409/502 envelope in the handler. S3 `NoSuchKey` maps to 400.
-- Categorizer uses whole-word regexes (so "car" does not match "card").
-- Test doubles in `tests/statements/*` and `tests/test_statements_handler.py` fake `ConditionalCheckFailed`,
-  `NoSuchKey`, and read the query key from `KeyConditionExpression._values[1]`. If you touch table access, expect to
-  adjust those doubles, and make sure the tests still assert real behaviour.
-- Statements Level 1 shipped; Sat 2pm gate rule from `.claude/CLAUDE.md`: PDF/image extraction only if solid, otherwise
-  CSV/text ships.
-
-### 7.5 Python FinanceFunction routes
-
-Live (`LIVE_ROUTES` in `handlers/finance.py`): `GET /portfolio/analysis`, `POST /fire/calculate`,
-`POST /fire/goal-impact`, `GET /net-worth`, `GET /net-worth/projection`, and the five statements/cashflow routes.
-**Still 501** (stubs exist in the template): `/chat`, `/securities/*`, `/fire/scenarios` GET/POST, `/loans/emi`,
-`/loans/prepayment-impact`, `/calculators/*`, and the AgentFunction routes (`/chat/{job_id}`, `/conversations`,
-`/conversations/{id}/messages`). To make a route live: add it to `LIVE_ROUTES` (or a regex like the statements
-one), add the dispatch branch in `handler`, keep unknown routes returning `not_implemented_response`.
-
-The level-1 price shim in the finance handler: `manual_current_value_paise` then FD formula then cost basis with
-a warning, else excluded with a warning. Yahoo prices are not used by the Python side yet.
-
----
-
-## 8. Frontend: what exists and what was changed in Aviral's pages
-
-- Auth: `context/AuthContext.jsx` restores the Cognito session (aws-amplify), `ProtectedRoute` redirects. API calls in
-  `lib/dashboardApi.js` and `lib/statementsApi.js` attach `Authorization: Bearer <access token>`.
-- Login page has email/password, Google, and **Try the Demo** (uses `VITE_DEMO_EMAIL` / `VITE_DEMO_PASSWORD`, defaults
-  to `demo@aicfo.app` and a placeholder, so the real values must be in `frontend/.env.local`). The demo user is
-  left populated (onboarding done, snapshot and portfolio present), so the button lands straight on `/overview`.
-- Overview: outflows come from canonical data (demo: living costs 40,000 + EMI 39,052 = 79,052 per month).
-- Balance Sheet: live Yahoo prices, P&L, allocation, history chart with NIFTY 50 and S&P 500 lines. Mutual funds show
-  "Unavailable" because Yahoo has no fund NAV.
-- News: six live market tiles (NIFTY, SENSEX, S&P 500, NASDAQ, gold, USD/INR), a flash wire from real headlines, the
-  news feed, and the "might suit you" ideas.
-- Milestones: goals via `/goals`, `lib/goalMapper.js` maps his shape to canonical (`current_saved_paise`, `target_date`).
-- Advisory (`/ai-advisory`): Aviral's stub. It should eventually call `/chat`.
-
-Changes made to Aviral's pages were limited to: (1) auth/data plumbing, (2) removing fabricated data (fake headlines,
-fake cash-flow history, buy price shown as live price), (3) hedging guarantee language ("ensures maximum compound
-growth" and similar), (4) sign-aware colours (a negative percentage move is red, not green). His copy and defaults
-are otherwise original. **Keep it that way**; if you must change his UI, say what and why to Aryan.
-
-Frontend commands (from `frontend/`): `npm test` (vitest, 80 tests), `npm run lint` (oxlint, warnings only, no errors),
-`npm run build`. `npm install` may modify `package-lock.json`; commit lockfile changes only if you meant to.
-
----
-
-## 9. Git state, deploy runbook
-
-### 9.1 Git
-
-- `main` = `014b57c` "feat: merge Aviral's v2 dashboard, news and holdings pages with an authenticated AWS backend",
-  parents `b2a4e75` and `4c3223e` (Aviral's `origin/aviral-onboarding-v2`). Pushed. Aviral just needs
-  `git pull origin main`.
-- Git identity is Aryan Pardeshi; commits are authored as him.
-- **Untracked, do not accidentally commit**: `backend-python/finance/{tax,insurance,creditcard,shortterm}.py` and
-  `backend-python/tests/finance/test_{tax,insurance,creditcard,shortterm}.py` (see section 11). Use explicit `git add
-  <paths>`, never `git add -A`.
-- Leftover branches and worktrees (safe to delete only when Aryan says so):
-  - Branches: `feat/aviral-v2-merge` and `backup/aviral-v2-merge-detail` (both `833bbf3`, the detailed per-step history of
-    the merge), `backup/pre-squash-2026-09-19` (`707aa89`, the 16-commit history before Aryan's squash), plus
-    `fix/onboarding-manual-value`, `fix/onboarding-step2-fields`, `fix/onboarding-step3-resume`, `refactor/node-mvc`,
-    `refactor/onboarding-pages`, `aviral-onboarding-process`.
-  - Worktrees: `../aicfo-wt-manualval`, `../aicfo-wt-nodemvc`, `../aicfo-wt-pages`, `../aicfo-wt-step2`,
-    `../aicfo-wt-step3`, `../Personal_AI_CFO-onboarding` (this is also the `onboarding-frontend-mock` dev server dir),
-    and scratch clones under `.worktrees/` (`aviral-v2-backend`, `aviral-v2-integration`, `aviral-v2-ui`,
-    `dashboard-truth`, `statements-level1`, plus Codex prompt files). `.worktrees/` is gitignored.
-  - `stash@{0}`: "rewind-reverted working tree (manual-value + demo-source fix rolled back), kept just in case".
-  - Refs `refs/codex/*` from a Codex run.
-- Rule for using worktrees for agent work: `git worktree add ../aicfo-wt-<topic> -b feat/<topic> main`, work there,
-  verify there, then bring it into main with a normal merge or cherry-pick after Aryan agrees.
-- To make a merge commit whose tree you have already verified elsewhere, `git merge -s ours --no-commit <other>`
-  followed by `git read-tree -u --reset <verified-tree>` then commit. That is how `014b57c` was produced.
-
-### 9.2 Deploy runbook (Aryan approved deploys to `aicfo-dev`; nothing else)
+### Backend: only `aicfo-dev`
 
 From `infra/`:
-1. `sam validate --lint`
-2. `sam build`
-3. `sam deploy --no-execute-changeset` (uses `samconfig.toml`: stack `aicfo-dev`, region `ap-south-1`,
-   `CAPABILITY_IAM`, parameter overrides for `GoogleClientId`, `FrontendCallbackUrls`, `FrontendOrigins`)
-4. Inspect the change set: `aws cloudformation describe-change-set --change-set-name <id> --stack-name aicfo-dev`.
-   **Every resource must be `Modify` with `Replacement: False` (or `Conditional` with an explanation you understand).**
-   If anything shows `Replacement: True` or `RequiresRecreation` (especially the Cognito pool, DynamoDB tables,
-   the bucket, or the HttpApi), stop and ask Aryan.
-5. `aws cloudformation execute-change-set --change-set-name <id> --stack-name aicfo-dev`
-6. `aws cloudformation wait stack-update-complete --stack-name aicfo-dev`
-7. Smoke test with a real Cognito access token (from the app: `fetchAuthSession()` in the browser console), for
-   example `GET /dashboard/profile`, `GET /portfolio/news`, `GET /portfolio/prices?tickers=RELIANCE.NS` (`tickers` is comma separated, at most 20, each must pass `safeTicker`).
-The last three deploys all ended `UPDATE_COMPLETE` with no replacement. Deploys need Aryan's AWS profile; if the CLI is
-not authenticated, stop and ask.
 
----
+```bash
+sam validate --lint
+sam build --cached
+sam deploy --no-execute-changeset --no-confirm-changeset
+aws cloudformation describe-change-set --change-set-name <arn> --stack-name aicfo-dev --region ap-south-1
+aws cloudformation execute-change-set --change-set-name <arn> --stack-name aicfo-dev --region ap-south-1
+aws cloudformation wait stack-update-complete --stack-name aicfo-dev --region ap-south-1
+```
 
-## 10. Test gates (run before saying anything is done)
+Inspect the changeset before executing. Do not replace Cognito, DynamoDB, S3, API Gateway, or AppSync resources.
+Keep `FrontendOrigins` and `FrontendCallbackUrls` in the deployment parameters when changing frontend hosting.
 
-Counts on `main` today (all just re-run and green):
+### Frontend: current manual Amplify path
 
-| Suite | Command | Result |
-| --- | --- | --- |
-| Node backend | `cd backend-node && npm test` | 269 pass, 0 fail |
-| Python (tracked) | `cd backend-python && py -3.13 -m pytest -q --ignore=tests/finance/test_tax.py --ignore=tests/finance/test_insurance.py --ignore=tests/finance/test_creditcard.py --ignore=tests/finance/test_shortterm.py` | 91 pass |
-| Python drafts | `py -3.13 -m pytest -q tests/finance/test_tax.py tests/finance/test_insurance.py tests/finance/test_creditcard.py tests/finance/test_shortterm.py` | 34 pass (unreviewed) |
-| Frontend | `cd frontend && npm test` | 80 pass in 9 files |
-| Frontend lint / build | `npm run lint` / `npm run build` | lint warnings only, build ok |
-| Infra | `cd infra && sam validate --lint` | valid |
+Build with the hosted API/Cognito variables, zip the contents of `frontend/dist` at the archive root, then use
+Amplify `create-deployment` → presigned `zipUploadUrl` PUT → `start-deployment` → `get-job`. Do not commit the zip.
+Keep the custom SPA rewrite in Amplify and verify that both client routes and static `/assets/*.js`/`.css` files return
+their correct content type. The public app is not a GitHub-connected Amplify build yet.
 
-Friday-night gate from the timeline (still the yardstick): login works, portfolio shows a real >25 percent concentration flag,
-security detail page loads, FIRE age shifts when a goal is added. The demo seed is built so the flag fires (RELIANCE
-is about 31 percent of the portfolio). Saturday 8pm gate: if agent streaming is not solid, fall back to polling and
-trim to Tier A tools.
+## 9. Prioritized remaining work
 
-Demo seed (`seed/demo-portfolio.json`, identical to `frontend/src/data/demoPortfolio.json`, keep the two in sync):
-RELIANCE 200 shares at 115000 paise, HDFCBANK 40 at 70000, NIFTYBEES 400 at 24500, PPFCF 1000 units at 8000, plus a
-FD of 3,00,000 rupees at 7 percent. Cost bases were made realistic against live prices (an earlier seed showed -93 percent).
+For the submission, prioritize the video/demo and reliability over new features:
 
----
+1. Record the working Amplify flow: landing/login/demo → overview → FIRE → security detail/fit → ARIA with a
+   retained follow-up → CSV review if time permits.
+2. Keep the direct calculator routes, PDF/image/XLSX extraction, and AI news digest out of the critical path.
+3. If additional time remains, wire MF NAVs into dashboard holdings, run a live Firecrawl citation smoke test, and
+   verify an authenticated AppSync subscribe path.
+4. Only after submission, connect Amplify to GitHub, add calculator pages/routes, cache Yahoo requests, and address
+   non-blocking frontend lint warnings.
 
-## 11. Open work, in the order I would do it
+Do not delete old branches/worktrees/stashes during the submission window. Do not force-push or rewrite published
+history. Push only a verified change when Aryan explicitly says “push it”.
 
-1. **Statement import next scope:** bank CSV and direct broker-holdings CSV imports are now wired. Keep PDF/image/XLSX
-   extraction out until the CSV review flows are stable; a broker funds ledger/tradebook needs a separately designed
-   position-reconstruction flow and must not be treated as a holdings export.
-2. **Review and commit the four calculator drafts** (tax, insurance, credit card payoff, short-term fit). They exist as
-   untracked files with 34 passing tests, but nobody has checked them against the specs in `.agents/modules.md`
-   (`# Module: calculators-seed`) and `.agents/finance-rules.md` (FY 2026-27 slabs, cess, rebates, LTCG 12.5 percent above
-   1.25 lakh, and so on). Do it test-first: read the spec, check each locked number, add missing cases, then add the
-   routes `/calculators/tax`, `/calculators/capital-gains`, `/calculators/insurance`, `/calculators/credit-card-payoff`,
-   `/securities/short-term-fit`, `/loans/emi`, `/loans/prepayment-impact` to `handlers/finance.py`, update openapi.
-   The calculator UI pages (`frontend/src/pages/calculators/`) are Ram's/Aviral's territory: ask Aryan.
-3. **Chat extensions** (`feat/agent-integrations`): the Kilo/Strands async chat, polling flow, persistence and Tier-A
-   tools are now live. Do not replace the durable DynamoDB transcript with process memory. Remaining work is instrument
-   search/security detail, Upstox and mfapi integration, Firecrawl safety fixtures, and optionally AppSync browser
-   streaming (polling is the working fallback). The **Upstox adapter is Ram+Sivsri's**, so ask before writing it.
-4. **Onboarding step-6 interest chips**: two optional chip rows (sectors, and what they like to hold) in our 8-step flow,
-   saved to `snapshot.preferences.{industries, instruments}` so News suggestions personalise from day one. Uses our own
-   frontend; the label strings must match what `selectedPreferences` and `INDUSTRY_ALIASES` / `INSTRUMENT_ALIASES` in
-   `portfolioService.js` expect (see Aviral's `ManualEntry.jsx` for the exact labels). Aryan agreed to the idea but
-   has not confirmed the change to our frontend.
-5. **Frontend hosting** (Amplify or similar): not deployed, it only runs on localhost:5174 today. Before hosting you must add
-   the hosted URL to `FrontendOrigins` and `FrontendCallbackUrls` (samconfig overrides and Cognito client callbacks),
-   and set `VITE_*` env vars in the host. That is a stack update, so use the runbook. Ask Aryan first.
-6. **Mutual fund prices** via mfapi.in so PPFCF and other funds stop showing "Unavailable". The `resolveMarketSymbol` returns
-   null for funds; a separate NAV path is needed. This is an agent-integrations item (`integrations/mfapi.py`).
-7. **AI news digest** ("Level 3" of the personalisation plan): an LLM summary on top of the deterministic ideas. Only after
-   the agent exists. Numbers must still come from the tested code.
-8. **Small known bugs / rough edges**:
-   - Updating an FD holding can rename it (minor rename-on-update bug in the holdings update path).
-   - Yahoo prices are fetched per request with no cache; if latency or rate limits bite, add a short in-memory cache in
-     `yahooProvider.js` with tests. (Lambda timeout is 20s.)
-   - ETF news through Google (for example NIFTYBEES) is generic market news.
-   - Aviral's `Advisory` page is a stub with no real ARIA behaviour.
-   - Lint has warnings on Aviral's files. Not errors; leave them unless asked.
-9. **Housekeeping** (ask before deleting anything): stale branches, worktrees and `stash@{0}` from section 9.1. `frontend/.env.local`
-   stays put.
-10. **Decision waiting on Aryan**: whether the demo account should be reset so "Try the Demo" starts at onboarding instead of on the dashboard.
+## 10. Quick answers
 
----
-
-## 12. How to verify (your job now)
-
-The biggest lesson of the last two days: **never trust a delegated agent's summary, including your own.** Two real cases:
-- An opencode agent (nemotron) shipped an XML entity decoder that was a chain of no-ops and a test whose input was
-  already decoded, so it passed vacuously. It reported 203/203 green. Reading the test against the real RSS fixture
-  exposed the bug immediately.
-- A Codex-built chart wired two benchmark lines to symbols the provider silently rejected, so the lines simply never rendered.
-
-Checklist for every change:
-1. Read the diff, not the summary. `git diff`, `git status`, and read the tests that were added.
-2. **Mutation check the tests**: break the implementation on purpose (or run the test against the old code) and confirm the test
-   fails for the intended reason. A test that cannot fail is worthless.
-3. Run real data through it. For market code, hit Yahoo and Google for real. For API code, call the deployed route with a real
-   Cognito token. For UI, drive the page in a browser and look at the numbers, not just "no console errors".
-4. Check invariants: paise integers, rate fractions, `sub`-only identity, hedged wording, no secrets in the diff.
-5. Run all gates from section 10 and compare counts against the table.
-6. If it touches `infra/template.yaml`, run the full deploy runbook up to changeset inspection and look for `Replacement`.
-
-Browser testing notes (Claude used the in-app browser pane): when the pane is hidden it reports a 0x0 viewport and screenshots
-time out. Select the tab, set a viewport size, and drive/inspect the DOM. Get an access token from the page with
-`fetchAuthSession()` from `aws-amplify/auth` (in Vite dev: `/node_modules/.vite/deps/aws-amplify_auth.js`).
-
----
-
-## 13. Working with opencode from here
-
-The delegation setup Claude used (you can reuse it if you spawn sub-runs):
-- Free model: `opencode/muse-spark-1.3-contributor-free`. Other free ones seen: `opencode/mimo-v2.5-free`,
-  `opencode/nemotron-3-ultra-free` (the one that produced the vacuous test, so review harder),
-  `opencode/nemotron-3.5-lightning-free`, `opencode/ling-3.0-flash-fin-free`, `opencode/muse-spark-1.2-contributor-free`,
-  `kilocode/kilo-auto/free`. Paid `opencode/*` models fail with "No payment method". Omitting `-m` fails
-  ("union-alpha not supported").
-- Invocation, **from inside the worktree**, message first, `-f` last (`-f` is greedy and swallows later positionals):
-
-  ```bash
-  opencode run "Read the attached BRIEF.md and implement it now. Do not ask questions." --auto --dir <worktree> -m opencode/muse-spark-1.3-contributor-free -f BRIEF.md
-  ```
-- Brief file contents that worked: goal in two lines, exact owned files, exact files not to touch, contracts to honour (paise,
-  `sub`, snake_case), the tests to write first, the commands that must pass, and "IMPLEMENT NOW, do not ask questions".
-  Keep it short and exact. Tell it to work test-first.
-- Fallback if opencode hits limits: `codex exec -m gpt-5.6-luna --approve-for-me -C <workdir> "<brief>"` (codex-cli 0.154.0). Codex was
-  rate-limited until 04:08 on 2026-09-19. Sandbox may block network installs.
-- Aryan's rule of thumb: complex, token-heavy coding goes to a free model with a brief and its own worktree; small contained edits
-  (a bound, a doc line, a one-file fix) are done directly.
-
----
-
-## 14. Locked decisions worth re-reading before you touch the area
-
-- `.agents/finance-rules.md`: FIRE, tax slabs, EMI, portfolio concentration threshold (25 percent), required test cases.
-- `.agents/api-contract.md`: enums, DynamoDB schema, every route. Dashboard, portfolio and statements sections were expanded
-  today and match the code.
-- `.agents/architecture.md`: stack, IAM, git workflow, day-1 verification checklist (Bedrock/Upstox/RELIANCE corporate-action/AppSync checks).
-- `.agents/project.md`: scope and do-not-change list.
-- `.agents/agent-guide.md`: Upstox, mfapi, Firecrawl, Kilo, AppSync facts and limits, the tool registry, web content safety rules.
-- `.agents/modules.md`: per-module owned paths, levels and gates.
-
-Pre-event checklist items still open in `.claude/CLAUDE.md`: Bedrock playground call, Upstox Analytics Token in a password
-manager, redacted bank statement CSV from Sivsri, 15-20 demo securities list from Ram, teammate MFA devices (console only),
-WeMakeDevs registrations for all four members.
-
----
-
-## 15. Quick facts for common questions
-
-- "Why does the demo show RELIANCE at about 31 percent?" It is deliberate so the >25 percent flag fires.
-- "Why does News fall back to Google?" Yahoo's search API returns no news for Indian tickers.
-- "Why are mutual funds Unavailable?" Yahoo has no fund NAV; needs mfapi.
-- "Where do I find the demo login?" Press Try the Demo on `/login`. The credentials are in gitignored `frontend/.env.local`; do not copy them into files or chat.
-- "Why is the stack template timeout 20s?" Crud fans out to Yahoo/Google for prices, news and history.
-- "Why not Bedrock?" Free plan blocks it; Kilo Gateway replaces it, Bedrock policy stays for a swap back.
-- "Which port?" 5174 for main; 5173 is the older onboarding worktree's mock server.
+- **Where is the website?** `https://main.d19guqu2l1q2px.amplifyapp.com`
+- **Where is local development?** `http://localhost:5174`
+- **Why can a direct route load?** Amplify has a regex SPA rewrite that excludes static assets.
+- **Why does ARIA use Kilo?** Bedrock inference is blocked for this account/plan; Kilo is the tested live route.
+- **Why might a mutual fund be unavailable?** A live NAV/source is required; the app must not invent one.
+- **Where is demo login?** Use **Try the Demo** on `/login`; credentials stay only in gitignored local configuration.
+- **Does ARIA trade or silently save?** No. It reads/analyses and prepares reviewable proposals; confirmed writes use
+  authenticated server routes.

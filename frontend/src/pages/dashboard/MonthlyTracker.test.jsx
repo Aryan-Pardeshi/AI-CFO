@@ -15,15 +15,19 @@ vi.mock('../../context/AuthContext', () => ({
 vi.mock('../../lib/dashboardApi.js', () => ({
   getDashboardProfile: vi.fn(),
   getCashflowSummary: vi.fn(),
+  saveDashboardFinancials: vi.fn(),
 }));
 
 vi.mock('../../lib/api.js', () => ({
   listLoans: vi.fn(),
+  createLoan: vi.fn(),
+  updateLoan: vi.fn(),
+  deleteLoan: vi.fn(),
 }));
 
 import MonthlyTracker from './MonthlyTracker.jsx';
-import { getCashflowSummary, getDashboardProfile } from '../../lib/dashboardApi.js';
-import { listLoans } from '../../lib/api.js';
+import { getCashflowSummary, getDashboardProfile, saveDashboardFinancials } from '../../lib/dashboardApi.js';
+import { listLoans, createLoan, updateLoan, deleteLoan } from '../../lib/api.js';
 
 const twoMonthCashflow = {
   months: [
@@ -271,5 +275,120 @@ describe('MonthlyTracker page (canonical data only, no fabricated figures)', () 
     expect(getCashflowSummary.mock.calls[0]).toEqual([]);
     expect(getDashboardProfile.mock.calls[0]).toEqual([]);
     expect(listLoans.mock.calls[0]).toEqual([]);
+  });
+
+  test('edit estimates modal: opens, modifies income/expenses, and saves via saveDashboardFinancials', async () => {
+    getCashflowSummary.mockResolvedValue(twoMonthCashflow);
+    getDashboardProfile.mockResolvedValue(profileFixture);
+    listLoans.mockResolvedValue(loanFixture);
+    saveDashboardFinancials.mockResolvedValue({ hasOnboarded: true });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('edit-estimates-btn')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('edit-estimates-btn'));
+
+    expect(screen.getByTestId('estimates-modal')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /edit monthly estimates/i })).toBeInTheDocument();
+
+    const salaryInput = screen.getByLabelText(/salary \/ wages/i);
+    await user.clear(salaryInput);
+    await user.type(salaryInput, '95000');
+
+    const foodInput = screen.getByLabelText(/food & groceries/i);
+    await user.clear(foodInput);
+    await user.type(foodInput, '18000');
+
+    await user.click(screen.getByTestId('save-estimates-btn'));
+
+    await waitFor(() => expect(saveDashboardFinancials).toHaveBeenCalledTimes(1));
+    const savedFinancials = saveDashboardFinancials.mock.calls[0][0];
+    expect(savedFinancials.incomes.jobSalary).toBe('95000.00');
+    expect(savedFinancials.monthlyExpenses.food).toBe('18000.00');
+    expect(screen.queryByTestId('estimates-modal')).not.toBeInTheDocument();
+  });
+
+  test('loan management: adds a new loan via Add Loan modal', async () => {
+    getCashflowSummary.mockResolvedValue(twoMonthCashflow);
+    getDashboardProfile.mockResolvedValue(profileFixture);
+    listLoans.mockResolvedValue(loanFixture);
+    createLoan.mockResolvedValue({ loan_id: 'l3', name: 'Education Loan' });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('add-loan-btn')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('add-loan-btn'));
+
+    expect(screen.getByTestId('loan-modal')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /add loan/i })).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/loan name/i), 'Education Loan');
+    await user.selectOptions(screen.getByLabelText(/loan type/i), 'EDUCATION');
+    await user.type(screen.getByLabelText(/principal \/ outstanding/i), '500000');
+    const rateInput = screen.getByLabelText(/annual rate/i);
+    await user.clear(rateInput);
+    await user.type(rateInput, '9.5');
+    const tenureInput = screen.getByLabelText(/tenure \(months\)/i);
+    await user.clear(tenureInput);
+    await user.type(tenureInput, '60');
+
+    await user.click(screen.getByTestId('save-loan-btn'));
+
+    await waitFor(() => expect(createLoan).toHaveBeenCalledTimes(1));
+    expect(createLoan).toHaveBeenCalledWith({
+      name: 'Education Loan',
+      loan_type: 'EDUCATION',
+      principal_paise: 50000000,
+      outstanding_paise: 50000000,
+      annual_rate: 0.095,
+      tenure_months: 60,
+    });
+    expect(screen.queryByTestId('loan-modal')).not.toBeInTheDocument();
+  });
+
+  test('loan management: edits an existing loan via edit button', async () => {
+    getCashflowSummary.mockResolvedValue(twoMonthCashflow);
+    getDashboardProfile.mockResolvedValue(profileFixture);
+    listLoans.mockResolvedValue(loanFixture);
+    updateLoan.mockResolvedValue({ loan_id: 'l1' });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('edit-loan-l1')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('edit-loan-l1'));
+
+    expect(screen.getByTestId('loan-modal')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /edit loan/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/loan name/i)).toHaveValue('Home loan');
+
+    const nameInput = screen.getByLabelText(/loan name/i);
+    await user.clear(nameInput);
+    await user.type(nameInput, 'SBI Home Loan');
+
+    await user.click(screen.getByTestId('save-loan-btn'));
+
+    await waitFor(() => expect(updateLoan).toHaveBeenCalledTimes(1));
+    expect(updateLoan.mock.calls[0][0]).toBe('l1');
+    expect(updateLoan.mock.calls[0][1].name).toBe('SBI Home Loan');
+  });
+
+  test('loan management: deletes a loan with confirmation', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getCashflowSummary.mockResolvedValue(twoMonthCashflow);
+    getDashboardProfile.mockResolvedValue(profileFixture);
+    listLoans.mockResolvedValue(loanFixture);
+    deleteLoan.mockResolvedValue({});
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId('delete-loan-l1')).toBeInTheDocument());
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('delete-loan-l1'));
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/delete this loan/i));
+    await waitFor(() => expect(deleteLoan).toHaveBeenCalledWith('l1'));
   });
 });
