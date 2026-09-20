@@ -33,7 +33,7 @@ if (userPoolId && userPoolClientId) {
 }
 
 async function bootstrap() {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (import.meta.env.DEV && (import.meta.env.VITE_USE_MOCKS === 'true' || !import.meta.env.VITE_API_BASE_URL)) {
     const { startMocks } = await import('./mocks/browser.js');
     await startMocks();
   }

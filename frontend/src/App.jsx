@@ -15,6 +15,8 @@ import Advisory from './pages/dashboard/Advisory';
 import Milestones from './pages/dashboard/Milestones';
 import BalanceSheet from './pages/dashboard/BalanceSheet';
 import News from './pages/dashboard/News';
+import Investments from './pages/dashboard/Investments';
+import SecurityDetail from './pages/dashboard/SecurityDetail';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, ProtectedRoute } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -46,6 +48,8 @@ function App() {
                 <Route path="milestones" element={<Milestones />} />
                 <Route path="balance-sheet" element={<BalanceSheet />} />
                 <Route path="news" element={<News />} />
+                <Route path="investments" element={<Investments />} />
+                <Route path="securities/:instrumentKey" element={<SecurityDetail />} />
                 {/* Redirect old dashboard path or index to overview */}
                 <Route path="dashboard" element={<Navigate to="/overview" replace />} />
               </Route>

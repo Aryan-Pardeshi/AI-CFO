@@ -20,4 +20,12 @@ describe('cash-flow response mapping', () => {
       hasHistory: false,
     });
   });
+
+  test('safely handles null summary without inventing financial data', () => {
+    expect(mapCashflowSummary(null)).toEqual({
+      points: [],
+      totals: { income: 0, expenses: 0, net: 0 },
+      hasHistory: false,
+    });
+  });
 });

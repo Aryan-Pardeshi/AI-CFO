@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import './Advisory.css';
 import {
   SUGGESTED_PROMPTS,
@@ -24,7 +25,16 @@ const TOPIC_CHIPS = [
   { label: 'Goals', prompt: 'What financial milestones and goals should I prioritize?' },
 ];
 
+function useSafeLocation() {
+  try {
+    return useLocation();
+  } catch {
+    return null;
+  }
+}
+
 const Advisory = () => {
+  const location = useSafeLocation();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,6 +47,14 @@ const Advisory = () => {
   const msgSeq = useRef(0);
   const textareaRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const initialPromptHandled = useRef(false);
+
+  useEffect(() => {
+    if (location?.state?.initialPrompt && !initialPromptHandled.current) {
+      initialPromptHandled.current = true;
+      setInput(location.state.initialPrompt);
+    }
+  }, [location?.state]);
 
   useEffect(() => {
     let cancelled = false;

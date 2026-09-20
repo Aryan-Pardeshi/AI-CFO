@@ -32,9 +32,13 @@ const Login = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function afterAuth() {
+  async function afterAuth(isDemo = false) {
     try {
       await login();
+      if (isDemo) {
+        navigate('/overview', { replace: true });
+        return;
+      }
       const profile = await getMe();
       if (profile && typeof profile.onboarding_step === 'number') {
         navigate(profile.onboarded ? '/overview' : '/onboarding', { replace: true });
@@ -44,8 +48,12 @@ const Login = () => {
         navigate('/overview', { replace: true });
       }
     } catch (err) {
-      if (err && (err.status === 404 || err.code === 'NOT_FOUND')) {
+      if (isDemo) {
+        navigate('/overview', { replace: true });
+      } else if (err && (err.status === 404 || err.code === 'NOT_FOUND')) {
         navigate('/onboarding', { replace: true });
+      } else {
+        navigate('/overview', { replace: true });
       }
     }
   }
@@ -86,25 +94,40 @@ const Login = () => {
 
   const handleDemo = async () => {
     setError('');
-    if (!MOCK_MODE && (!DEMO_EMAIL || !DEMO_PASSWORD)) {
-      setError("Demo login isn't configured yet — use email for now");
+    // If real demo credentials are provided in env, use them
+    if (DEMO_EMAIL && DEMO_PASSWORD) {
+      setLoading(true);
+      try {
+        const result = await signInUser({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
+        if (result?.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
+          setError('Demo account is unverified — ask the team to fix the seeded demo user');
+          return;
+        }
+        await afterAuth(true);
+      } catch (err) {
+        setError(err?.message || 'Demo login failed');
+      } finally {
+        setLoading(false);
+      }
       return;
     }
-    setLoading(true);
-    try {
-      const email = DEMO_EMAIL || 'demo@aicfo.app';
-      const password = DEMO_PASSWORD || 'demo';
-      const result = await signInUser({ email, password });
-      if (result?.nextStep?.signInStep === 'CONFIRM_SIGN_UP') {
-        setError('Demo account is unverified — ask the team to fix the seeded demo user');
-        return;
+
+    // In local dev mode or mock mode, enable local QA demo login without requiring committed credentials
+    if (import.meta.env.DEV || MOCK_MODE) {
+      setLoading(true);
+      try {
+        const { mockSignIn } = await import('../mocks/auth-mock.js');
+        await mockSignIn({ email: 'demo@aicfo.app' });
+        await afterAuth(true);
+      } catch (err) {
+        setError(err?.message || 'Local QA demo login failed');
+      } finally {
+        setLoading(false);
       }
-      await afterAuth();
-    } catch (err) {
-      setError(err?.message || 'Demo login failed');
-    } finally {
-      setLoading(false);
+      return;
     }
+
+    setError("Demo login isn't configured yet — use email for now");
   };
 
   return (
