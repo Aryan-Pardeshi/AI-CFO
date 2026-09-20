@@ -209,7 +209,7 @@ export function fdHoldingSync({ serverId, paise }) {
   return serverId ? 'delete' : 'skip';
 }
 
-export function buildHoldingPayload({ assetType, symbol, name, quantity, avgBuyPricePaise, manualCurrentValuePaise }) {
+export function buildHoldingPayload({ assetType, symbol, name, quantity, avgBuyPricePaise, manualCurrentValuePaise, source }) {
   const payload = {
     asset_type: assetType,
     symbol,
@@ -218,6 +218,7 @@ export function buildHoldingPayload({ assetType, symbol, name, quantity, avgBuyP
     avg_buy_price_paise: avgBuyPricePaise,
   };
   if (manualCurrentValuePaise !== undefined) payload.manual_current_value_paise = manualCurrentValuePaise;
+  if (source !== undefined) payload.source = source;
   return payload;
 }
 

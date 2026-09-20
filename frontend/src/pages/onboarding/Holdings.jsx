@@ -6,6 +6,7 @@ import StatementAutofillBox from '../../components/onboarding/StatementAutofillB
 import { errStyle, inputStyle } from '../../components/onboarding/styles.js';
 import { ASSET_TYPE_LABELS, buildFdPayload, buildHoldingPayload, fdHoldingSync, mapHoldingRows, parseRupeesField, paiseToRupees, serverIdOf, holdingRowSync } from '../../lib/onboarding.js';
 import { createHolding, deleteHolding, listHoldings, updateHolding } from '../../lib/api.js';
+import { parseBrokerHoldingsCsv, parseSafeHoldingQuantity } from '../../lib/brokerHoldingsCsv.js';
 
 const ASSET_OPTIONS = [{ value: 'STOCK', label: ASSET_TYPE_LABELS.STOCK }, { value: 'ETF', label: ASSET_TYPE_LABELS.ETF }, { value: 'MUTUAL_FUND', label: ASSET_TYPE_LABELS.MUTUAL_FUND }, { value: 'CRYPTO', label: ASSET_TYPE_LABELS.CRYPTO }, { value: 'OTHER', label: ASSET_TYPE_LABELS.OTHER }];
 
@@ -14,8 +15,11 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState('');
   const [holdingsStatementMsg, setHoldingsStatementMsg] = useState('');
+  const [holdingsStatementLoading, setHoldingsStatementLoading] = useState(false);
+  const [holdingsHydration, setHoldingsHydration] = useState('loading');
   const [demoMsg, setDemoMsg] = useState('');
   const idRef = useRef(2);
+  const localChangeVersionRef = useRef(0);
   const [holdings, setHoldings] = useState([{ id: 'holding-1', asset_type: 'STOCK', symbol: '', name: '', quantity: '', buyPrice: '', valueOnly: false, currentValue: '', server_id: null }]);
   const [fdAmount, setFdAmount] = useState('');
   const [fdServerId, setFdServerId] = useState(null);
@@ -23,35 +27,58 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
   const [declaredNetWorth, setDeclaredNetWorth] = useState(() => profile?.declared_net_worth_paise !== null && profile?.declared_net_worth_paise !== undefined ? paiseToRupees(profile.declared_net_worth_paise) : '');
   const [emergencyMonths, setEmergencyMonths] = useState(() => profile?.emergency_fund_target_months !== null && profile?.emergency_fund_target_months !== undefined ? String(profile.emergency_fund_target_months) : '6');
 
+  function markLocalChange() {
+    localChangeVersionRef.current += 1;
+  }
+
   useEffect(() => {
     let cancelled = false;
+    const hydrationVersion = localChangeVersionRef.current;
     listHoldings()
       .then((items) => {
         if (cancelled || !Array.isArray(items)) return;
+        if (localChangeVersionRef.current !== hydrationVersion && items.length > 0) {
+          setHoldingsHydration('conflict');
+          setHoldingsStatementMsg('Existing saved holdings were found while this page was being edited. Refresh before importing or saving to prevent duplicates.');
+          return;
+        }
+        if (localChangeVersionRef.current !== hydrationVersion) {
+          setHoldingsHydration('ready');
+          return;
+        }
         const mapped = mapHoldingRows(items);
         if (mapped.fdAmount !== null) {
           setFdAmount(mapped.fdAmount);
           setFdServerId(mapped.fdServerId);
         }
         if (mapped.holdings) setHoldings(mapped.holdings);
+        setHoldingsHydration('ready');
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setHoldingsHydration('failed');
+          setHoldingsStatementMsg('Could not check existing holdings. Refresh before importing or saving.');
+        }
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
   function addHoldingRow() {
+    markLocalChange();
     const id = `holding-${idRef.current}`;
     idRef.current += 1;
     setHoldings((prev) => [...prev, { id, asset_type: 'STOCK', symbol: '', name: '', quantity: '', buyPrice: '', valueOnly: false, currentValue: '', server_id: null }]);
   }
 
   function editHolding(id, field, value) {
+    markLocalChange();
     setHoldings((prev) => prev.map((h) => (h.id === id ? { ...h, [field]: value } : h)));
   }
 
   async function removeHoldingRow(id) {
+    markLocalChange();
     const row = holdings.find((h) => h.id === id);
     if (row?.server_id) {
       try {
@@ -72,11 +99,42 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
     });
   }
 
-  function handleHoldingsAutofill() {
-    setHoldingsStatementMsg("Broker statement import isn't available yet - enter your holdings manually");
+  async function handleHoldingsAutofill(file) {
+    if (holdingsHydration !== 'ready') {
+      setHoldingsStatementMsg(holdingsHydration === 'loading'
+        ? 'Checking existing holdings before import…'
+        : 'Refresh before importing so existing holdings can be checked.');
+      return;
+    }
+    if (holdings.some((row) => row.server_id)) {
+      setHoldingsStatementMsg('Saved holdings cannot be overwritten by broker import. Remove saved holdings before importing.');
+      return;
+    }
+    markLocalChange();
+    setHoldingsStatementLoading(true);
+    setHoldingsStatementMsg('');
+    try {
+      const drafts = parseBrokerHoldingsCsv(await file.text());
+      setHoldings(drafts.map((draft) => {
+        const id = `holding-${idRef.current}`;
+        idRef.current += 1;
+        return { ...draft, id, valueOnly: false, currentValue: '', server_id: null, source: 'IMPORTED' };
+      }));
+      setHoldingsEntryMode('individual');
+      setHoldingsStatementMsg('Imported broker holdings are ready to review rows then press Continue.');
+    } catch (err) {
+      setHoldingsStatementMsg(err?.message || 'Could not read broker holdings CSV');
+    } finally {
+      setHoldingsStatementLoading(false);
+    }
   }
 
   async function loadDemoPortfolio() {
+    if (holdingsHydration !== 'ready') {
+      setFormError('Refresh this page before loading a demo portfolio so existing holdings can be checked.');
+      return;
+    }
+    markLocalChange();
     setDemoMsg('');
     setFormError('');
     setSaving(true);
@@ -102,6 +160,11 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
   }
 
   async function continueFromStep4() {
+    if (holdingsHydration !== 'ready') {
+      setFormError('Refresh this page before saving so existing holdings can be checked.');
+      return;
+    }
+    markLocalChange();
     const next = {};
     const em = Number(emergencyMonths);
     if (!Number.isInteger(em) || em < 0 || em > 24) next.emergencyMonths = 'Enter 0–24 months';
@@ -141,8 +204,12 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
           toSave.push({ row: h, qty: 1, paise: current.paise });
         }
       } else {
-        const qty = Number(h.quantity);
-        if (h.quantity.trim() === '' || !Number.isFinite(qty) || qty <= 0) next[`holding_${h.id}_qty`] = 'Quantity must be positive';
+        let qty;
+        try {
+          qty = parseSafeHoldingQuantity(h.quantity);
+        } catch (err) {
+          next[`holding_${h.id}_qty`] = err?.message || 'Quantity must be positive';
+        }
         const bp = parseRupeesField('Average buy price', h.buyPrice);
         if (bp.error) next[`holding_${h.id}_price`] = bp.error;
         if (!next[`holding_${h.id}_symbol`] && !next[`holding_${h.id}_qty`] && !next[`holding_${h.id}_price`]) {
@@ -167,6 +234,7 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
           quantity: qty,
           avgBuyPricePaise: paise,
           manualCurrentValuePaise: row.valueOnly ? paise : (row.server_id ? null : undefined),
+          source: row.server_id ? undefined : row.source,
         });
         if (row.server_id) {
           await updateHolding(row.server_id, payload);
@@ -200,17 +268,17 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
   return (
     <div>
       {formError && <div style={{ color: 'var(--error-color)', marginBottom: '1rem', fontSize: '0.875rem' }}>{formError}</div>}
-      <div style={{ marginBottom: '1.5rem' }}><StatementAutofillBox heading="Auto-fill from a broker statement (optional)" helperText="Try importing a holdings or CAS statement to fill these numbers." onClick={handleHoldingsAutofill} message={holdingsStatementMsg} /></div>
+      <div style={{ marginBottom: '1.5rem' }}><StatementAutofillBox heading="Auto-fill from a broker statement (optional)" helperText="Choose a broker holdings CSV to fill these numbers locally." onFileSelected={handleHoldingsAutofill} fileLabel="Broker holdings CSV" inputId="onboarding-broker-holdings-csv" loading={holdingsStatementLoading || holdingsHydration !== 'ready'} message={holdingsStatementMsg} /></div>
       <div role="group" aria-label="How to add investments" style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input type="radio" name="holdings-entry-mode" checked={holdingsEntryMode === 'individual'} onChange={() => setHoldingsEntryMode('individual')} />
+          <input type="radio" name="holdings-entry-mode" checked={holdingsEntryMode === 'individual'} onChange={() => { markLocalChange(); setHoldingsEntryMode('individual'); }} />
           Add holdings individually
         </label>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input type="radio" name="holdings-entry-mode" checked={holdingsEntryMode === 'total'} onChange={() => setHoldingsEntryMode('total')} />
+          <input type="radio" name="holdings-entry-mode" checked={holdingsEntryMode === 'total'} onChange={() => { markLocalChange(); setHoldingsEntryMode('total'); }} />
           Enter a total only
         </label>
-        <Button variant="outline" onClick={loadDemoPortfolio} disabled={saving} style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
+        <Button variant="outline" onClick={loadDemoPortfolio} disabled={saving || holdingsHydration !== 'ready'} style={{ width: 'auto', padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
           Load a demo portfolio
         </Button>
       </div>
@@ -275,7 +343,7 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
       )}
       {holdingsEntryMode === 'total' && (
         <div style={{ marginTop: '1rem' }}>
-          <Input label="Total current value of your investments, including FDs (Rs)" id="declaredNetWorth" value={declaredNetWorth} onChange={(e) => setDeclaredNetWorth(e.target.value)} placeholder="e.g. 500000" />
+          <Input label="Total current value of your investments, including FDs (Rs)" id="declaredNetWorth" value={declaredNetWorth} onChange={(e) => { markLocalChange(); setDeclaredNetWorth(e.target.value); }} placeholder="e.g. 500000" />
           {errors.declaredNetWorth && <div style={errStyle}>{errors.declaredNetWorth}</div>}
           {savedHoldingsCount > 0 && (
             <div style={{ ...errStyle, color: 'var(--text-secondary)' }}>
@@ -287,12 +355,12 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginTop: '1.5rem' }}>
         {holdingsEntryMode === 'individual' && (
           <div>
-            <Input label="Fixed deposits total (₹)" id="fdAmount" value={fdAmount} onChange={(e) => setFdAmount(e.target.value)} placeholder="e.g. 500000" />
+            <Input label="Fixed deposits total (₹)" id="fdAmount" value={fdAmount} onChange={(e) => { markLocalChange(); setFdAmount(e.target.value); }} placeholder="e.g. 500000" />
             {errors.fdAmount && <div style={errStyle}>{errors.fdAmount}</div>}
           </div>
         )}
         <div>
-          <Input label="Emergency fund target (months)" id="emergencyMonths" value={emergencyMonths} onChange={(e) => setEmergencyMonths(e.target.value)} placeholder="6" />
+          <Input label="Emergency fund target (months)" id="emergencyMonths" value={emergencyMonths} onChange={(e) => { markLocalChange(); setEmergencyMonths(e.target.value); }} placeholder="6" />
           {errors.emergencyMonths && <div style={errStyle}>{errors.emergencyMonths}</div>}
         </div>
       </div>
