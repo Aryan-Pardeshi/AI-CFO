@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import uuid
@@ -98,6 +99,57 @@ TXN_CATEGORIES = {
     "SHOPPING", "UTILITIES", "SUBSCRIPTIONS", "EMI", "INVESTMENTS", "TRANSFER",
     "HEALTH", "EDUCATION", "ENTERTAINMENT", "OTHER",
 }
+
+FIRE_SCENARIO_FIELDS = {
+    "target_age": (int, 18, 120),
+    "current_age": (int, 18, 100),
+    "monthly_expenses_paise": (int, 0, 10_000_000_000_000),
+    "monthly_investment_paise": (int, 0, 10_000_000_000_000),
+    "current_corpus_paise": (int, 0, 100_000_000_000_000_000),
+    "goals": (list, 0, 50),
+    "loans": (list, 0, 50),
+    "inflation": (float, 0.0, 1.0),
+    "step_up": (float, 0.0, 1.0),
+    "return_before_40": (float, -1.0, 2.0),
+    "return_40_to_60": (float, -1.0, 2.0),
+    "return_after_60": (float, -1.0, 2.0),
+    "post_fire_return": (float, -1.0, 2.0),
+    "lifespan_age": (int, 40, 120),
+}
+
+
+def _validate_fire_scenario_inputs(inputs: object) -> dict | None:
+    """Validate the persisted FIRE override schema; never accept arbitrary dicts."""
+    if not isinstance(inputs, dict) or not inputs:
+        return None
+    if any(key not in FIRE_SCENARIO_FIELDS for key in inputs):
+        return None
+    for key, value in inputs.items():
+        expected, minimum, maximum = FIRE_SCENARIO_FIELDS[key]
+        if key in {"goals", "loans"}:
+            if not isinstance(value, list) or len(value) > maximum:
+                return None
+            allowed = ({"goal_type", "amount_today_paise", "target_age", "inflation_rate"}
+                       if key == "goals" else {"annual_emi_paise", "end_age"})
+            for item in value:
+                if not isinstance(item, dict) or any(field not in allowed for field in item):
+                    return None
+                for field, number in item.items():
+                    if isinstance(number, bool) or field in {"goal_type"}:
+                        if field == "goal_type" and isinstance(number, str) and number.strip():
+                            continue
+                        return None
+                    if not isinstance(number, (int, float)) or number < 0:
+                        return None
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if expected is int and not isinstance(value, int):
+            return None
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < minimum or numeric > maximum:
+            return None
+    return dict(inputs)
 
 
 # ---------- response helpers (api-contract.md error envelope) ----------
@@ -281,8 +333,9 @@ def create_fire_scenario_route(user_id: str, body: dict) -> dict:
     inputs = body.get("inputs")
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
         return _validation("name is required and must be at most 120 characters")
-    if not isinstance(inputs, dict):
-        return _validation("inputs must be an object")
+    inputs = _validate_fire_scenario_inputs(inputs)
+    if inputs is None:
+        return _validation("inputs contain an unknown field or invalid value")
     now = datetime.now(timezone.utc).isoformat()
     scenario = {
         "user_id": user_id,
@@ -313,9 +366,28 @@ def update_transaction_category_route(user_id: str, txn_id: str, body: dict) -> 
     if int(row.get("version") or 1) != version:
         return _conflict("Transaction changed; refresh and try again")
     now = datetime.now(timezone.utc).isoformat()
-    updated = {**row, "category": category, "category_source": "user",
-               "version": version + 1, "updated_at": now}
-    table.put_item(Item=updated)
+    key = {"user_id": user_id, "txn_sk": row.get("txn_sk") or row.get("txn_id")}
+    try:
+        result = table.update_item(
+            Key=key,
+            UpdateExpression="SET category = :category, category_source = :source, #version = :next_version, updated_at = :updated_at",
+            ConditionExpression="#version = :expected_version",
+            ExpressionAttributeNames={"#version": "version"},
+            ExpressionAttributeValues={
+                ":category": category,
+                ":source": "user",
+                ":expected_version": version,
+                ":next_version": version + 1,
+                ":updated_at": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return _conflict("Transaction changed; refresh and try again")
+        raise
+    updated = result.get("Attributes") or {**row, "category": category, "category_source": "user",
+                                            "version": version + 1, "updated_at": now}
     return _ok({"transaction": updated})
 
 

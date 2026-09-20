@@ -16,7 +16,7 @@ export default function ActivityTrace({ activity = [], citations = [] }) {
       {citations.length > 0 && (
         <div className="aria-citations">
           {citations.map((citation) => (
-            citation.url ? (
+            citation.url && /^https:\/\//i.test(citation.url) ? (
               <a key={`${citation.url}-${citation.as_of}`} href={citation.url} target="_blank" rel="noreferrer">
                 {citation.title} ({citation.as_of})
               </a>

@@ -15,12 +15,22 @@ export default function ActionReviewCard({ proposal, onComplete, onCancel }) {
     }
   };
   if (!isSafeAction(proposal)) return null;
+  const format = (value) => {
+    if (value === undefined || value === null || value === '') return 'Not set';
+    if (typeof value === 'object') {
+      try { return JSON.stringify(value); } catch { return 'Unavailable'; }
+    }
+    return String(value);
+  };
   return (
     <section className="aria-action-card" aria-label="Review proposed change">
       <p className="aria-action-summary">{proposal.summary}</p>
       <dl>
         {Object.entries(proposal.payload ?? {}).map(([key, value]) => (
-          <div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>
+          <div key={key} className="aria-action-diff-row">
+            <dt>{key}</dt>
+            <dd><span>{format(proposal.operation === 'create' ? undefined : proposal.current?.[key])}</span> → <strong>{format(value)}</strong></dd>
+          </div>
         ))}
       </dl>
       {state === 'stale' && <p role="alert">This changed already. Refresh ARIA and ask again.</p>}

@@ -180,4 +180,21 @@ describe('Advisory interactive chat UI', () => {
     expect(await screen.findByRole('table')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Net surplus' })).toBeInTheDocument();
   });
+
+  test('restores safe activity, citations, and future proposals from retained history', async () => {
+    getConversationMessages.mockResolvedValueOnce([{
+      role: 'assistant',
+      content: 'Saved answer',
+      tool_activity: [{ tool: 'get_net_worth', source: 'ARIA', status: 'completed', timestamp: '2026-09-20T00:00:00Z' }],
+      citations: [{ title: 'Unsafe', url: 'javascript:alert(1)', as_of: '2026-09-20' }],
+      proposed_actions: [{ entity: 'goal', operation: 'update', target: 'g1', payload: { name: 'Car' }, expires_at: '2099-01-01T00:00:00Z', summary: 'Update goal' }],
+    }]);
+    render(React.createElement(Advisory));
+    await screen.findByRole('button', { name: 'New chat' });
+    fireEvent.change(screen.getByLabelText('Past chats'), { target: { value: 'conv-1' } });
+    expect(await screen.findByText(/ARIA activity/)).toBeInTheDocument();
+    expect(screen.getByText('Saved answer')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Unsafe/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
+  });
 });

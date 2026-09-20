@@ -303,8 +303,35 @@ class _MutationTable:
         self.puts.append(kwargs)
         self.item = kwargs["Item"]
 
+    def update_item(self, **kwargs):
+        if self.item is None:
+            return {"Attributes": {}}
+        values = kwargs.get("ExpressionAttributeValues", {})
+        self.item = {**self.item, "category": values.get(":category", self.item.get("category")),
+                     "category_source": values.get(":source", self.item.get("category_source")),
+                     "version": values.get(":next_version", self.item.get("version")),
+                     "updated_at": values.get(":updated_at", self.item.get("updated_at"))}
+        return {"Attributes": self.item}
+
     def query(self, **kwargs):
         return {"Items": [self.item] if self.item and self.item.get("user_id") == "user-123" else []}
+
+
+class _ConditionalMutationTable(_MutationTable):
+    def __init__(self, item=None, conditional_failure=False):
+        super().__init__(item)
+        self.conditional_failure = conditional_failure
+
+    def update_item(self, **kwargs):
+        if self.conditional_failure:
+            error = RuntimeError("conditional failure")
+            error.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+            raise error
+        assert kwargs["Key"]["user_id"] == "user-123"
+        assert kwargs["Key"]["txn_sk"] == self.item["txn_sk"]
+        self.item = {**self.item, "category": kwargs["ExpressionAttributeValues"][":category"],
+                     "category_source": "user", "version": kwargs["ExpressionAttributeValues"][":next_version"]}
+        return {"Attributes": self.item}
 
 
 def test_fire_scenario_create_uses_verified_owner_and_validates_body(monkeypatch):
@@ -348,3 +375,29 @@ def test_transaction_category_update_enforces_owner_and_version(monkeypatch):
     }), None)
     assert fresh["statusCode"] == 200
     assert table.item["category"] == "GROCERIES"
+
+
+def test_transaction_category_update_translates_atomic_conditional_failure(monkeypatch):
+    table = _ConditionalMutationTable({"user_id": "user-123", "txn_sk": "2026-09-01#txn-1",
+                                       "txn_id": "txn-1", "category": "OTHER", "version": 3},
+                                      conditional_failure=True)
+    monkeypatch.setattr(fin, "_table", lambda name: table)
+    res = fin.handler(_event("PATCH", "/transactions/txn-1/category", body={
+        "category": "GROCERIES", "version": 3,
+    }), None)
+    assert res["statusCode"] == 409
+    assert json.loads(res["body"])["error"]["code"] == "CONFLICT"
+
+
+@pytest.mark.parametrize("inputs", [
+    {"current_age": 17, "monthly_expenses_paise": 1, "monthly_investment_paise": 1,
+     "current_corpus_paise": 0, "lifespan_age": 91},
+    {"current_age": 40, "monthly_expenses_paise": 1, "monthly_investment_paise": 1,
+     "current_corpus_paise": 0, "unknown": 1},
+    {"current_age": 40, "monthly_expenses_paise": -1, "monthly_investment_paise": 1,
+     "current_corpus_paise": 0},
+])
+def test_fire_scenario_rejects_invalid_or_unknown_inputs(monkeypatch, inputs):
+    monkeypatch.setattr(fin, "_table", lambda name: _MutationTable())
+    res = fin.handler(_event("POST", "/fire/scenarios", body={"name": "Bad", "inputs": inputs}), None)
+    assert res["statusCode"] == 400
