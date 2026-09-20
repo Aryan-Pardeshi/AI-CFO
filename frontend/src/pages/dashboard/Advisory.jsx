@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './Advisory.css';
+import ActivityTrace from '../../components/aria/ActivityTrace.jsx';
+import ActionReviewCard from '../../components/aria/ActionReviewCard.jsx';
 import {
   SUGGESTED_PROMPTS,
   assistantStatusLabel,
@@ -105,7 +109,7 @@ const Advisory = () => {
 
     let job;
     try {
-      job = await startChatJob({ message: text, conversationId });
+          job = await startChatJob({ message: text, conversationId });
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== pendingId));
       setBusy(false);
@@ -127,7 +131,14 @@ const Advisory = () => {
           if (update.status === 'COMPLETED') {
             const answer = extractAssistantText(update);
             setMessages((prev) =>
-              prev.map((m) => (m.id === pendingId ? { ...m, content: answer, pending: false } : m)),
+              prev.map((m) => (m.id === pendingId ? {
+                ...m,
+                content: answer,
+                pending: false,
+                tool_activity: update.tool_activity,
+                citations: update.citations,
+                proposed_actions: update.proposed_actions,
+              } : m)),
             );
           } else {
             setMessages((prev) => prev.filter((m) => m.id !== pendingId));
@@ -135,6 +146,12 @@ const Advisory = () => {
           }
         } else {
           setStatus(assistantStatusLabel(update));
+          setMessages((prev) => prev.map((m) => (m.id === pendingId ? {
+            ...m,
+            tool_activity: update.tool_activity,
+            citations: update.citations,
+            proposed_actions: update.proposed_actions,
+          } : m)));
         }
       },
     });
@@ -161,7 +178,7 @@ const Advisory = () => {
       {/* Header - Open, unboxed */}
       <header className="advisory-header">
         <div className="advisory-header-content">
-          <h2 className="advisory-title">ARIA Advisory</h2>
+          <h2 className="advisory-title">ARIA</h2>
           <p className="advisory-subtitle">Your private AI wealth intelligence.</p>
         </div>
         {showHistory && (
@@ -273,7 +290,24 @@ const Advisory = () => {
                     </span>
                   </div>
                 ) : (
-                  msg.content
+                  <>
+                    <div className="advisory-markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
+                    <ActivityTrace activity={msg.tool_activity} citations={msg.citations} />
+                    {(msg.proposed_actions ?? []).map((proposal, index) => (
+                      <ActionReviewCard
+                        key={`${proposal.entity}-${proposal.target ?? 'new'}-${index}`}
+                        proposal={proposal}
+                        onComplete={() => conversationId && loadConversation(conversationId)}
+                        onCancel={() => setMessages((prev) => prev.map((item) => item.id === msg.id
+                          ? { ...item, proposed_actions: (item.proposed_actions ?? []).filter((_, i) => i !== index) }
+                          : item))}
+                      />
+                    ))}
+                  </>
                 )}
               </div>
             </div>

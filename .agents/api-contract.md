@@ -240,6 +240,8 @@ POST /calculators/insurance    POST /calculators/credit-card-payoff
 POST /statements               POST /statements/{job_id}/process
 GET  /statements/{job_id}      POST /statements/{job_id}/commit
 GET  /cashflow/summary
+POST /fire/scenarios           → 201 after browser-confirmed, authenticated create
+PATCH /transactions/{txn_id}/category → 200 after browser-confirmed category update; requires version
 ```
 Instrument keys contain `|` (e.g. `NSE_EQ|INE040A01034`) — always in the **query string**,
 never a path parameter.

@@ -156,6 +156,9 @@ components:
         start_date: {type: string, format: date}
         rate_type: {$ref: '#/components/schemas/RateType'}
         prepayment_charge_pct: {type: number, default: 0}
+        issuer: {type: string, maxLength: 120, nullable: true, description: "Card issuer for CREDIT_CARD loans only; trimmed, optional."}
+        credit_limit_paise: {type: integer, minimum: 0, maximum: 10000000000, nullable: true, description: "Total credit limit for CREDIT_CARD loans only, integer paise."}
+        payment_due_day: {type: integer, minimum: 1, maximum: 31, nullable: true, description: "Statement due day-of-month for CREDIT_CARD loans only."}
 
     PortfolioAnalysis:
       type: object
@@ -798,7 +801,17 @@ paths:
         '404': {description: No user profile, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /fire/scenarios:
     get: {summary: List saved scenarios, responses: {'200': {description: OK}}}
-    post: {summary: Save a scenario, responses: {'201': {description: Created}}}
+    post:
+      summary: Save a scenario after explicit browser confirmation
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name, inputs], properties: {name: {type: string, maxLength: 120}, inputs: {type: object}}}}}}
+      responses: {'201': {description: Created}, '400': {description: Validation error}, '401': {description: Unauthorized}}
+
+  /transactions/{txn_id}/category:
+    patch:
+      summary: Change one owned transaction category after explicit browser confirmation
+      parameters: [{name: txn_id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [category, version], properties: {category: {$ref: '#/components/schemas/TxnCategory'}, version: {type: integer, minimum: 1}}}}}}
+      responses: {'200': {description: Updated}, '400': {description: Validation error}, '404': {description: Not found or not owned}, '409': {description: Version conflict}}
 
   /net-worth:
     get:

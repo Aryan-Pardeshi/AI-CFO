@@ -237,10 +237,29 @@ describe('safe status + suggestions + send key', () => {
       answer: '',
       error: undefined,
       tools_used: [],
+      tool_activity: [],
+      citations: [],
+      proposed_actions: [],
       raw: null,
     });
     const job = normalizeChatJob({ job_id: 'j', status: 'RUNNING', note: 'future' });
     expect(job.answer).toBe('');
     expect(job.raw.note).toBe('future');
+  });
+});
+import { describe, expect, test } from 'vitest';
+import { normalizeChatJob } from './chatApi.js';
+
+describe('chat metadata normalization', () => {
+  test('keeps safe activity, citations, and proposed actions only', () => {
+    const job = normalizeChatJob({
+      status: 'RUNNING',
+      tool_activity: [{ tool: 'get_fire', status: 'started' }, { tool: '<script>' }],
+      citations: [{ title: 'Official source', url: 'https://example.com/source', as_of: '2026-09-20' }, { title: 'bad', url: 'javascript:alert(1)' }],
+      proposed_actions: [{ entity: 'fire_scenario', operation: 'create', target: 'scenario-1', payload: { target_age: 50 }, summary: 'Save FIRE scenario', expires_at: '2026-09-20T11:00:00Z' }],
+    });
+    expect(job.tool_activity).toHaveLength(1);
+    expect(job.citations).toEqual([{ title: 'Official source', url: 'https://example.com/source', as_of: '2026-09-20' }]);
+    expect(job.proposed_actions[0].entity).toBe('fire_scenario');
   });
 });

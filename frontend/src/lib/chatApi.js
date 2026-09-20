@@ -27,6 +27,63 @@ function safeToolNames(value) {
   });
 }
 
+const SAFE_ACTIVITY_STATUSES = new Set(['started', 'completed', 'failed']);
+const SAFE_ACTIONS = {
+  profile: new Set(['name', 'risk_profile', 'investment_horizon_years', 'strategy_goal']),
+  holding: new Set(['quantity', 'avg_buy_price_paise', 'manual_current_value_paise']),
+  goal: new Set(['name', 'target_amount_paise', 'target_date', 'priority']),
+  loan: new Set(['outstanding_principal_paise', 'interest_rate', 'monthly_payment_paise']),
+  fire_scenario: new Set(['name', 'inputs']),
+  transaction_category: new Set(['category', 'version']),
+};
+
+function safeString(value, max = 120) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max ? value : '';
+}
+
+function safeActivity(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const name = safeString(item.tool || item.name, 80);
+    const source = safeString(item.source || 'ARIA', 80);
+    const status = safeString(item.status, 20).toLowerCase();
+    const timestamp = safeString(item.timestamp, 40);
+    if (!name || !source || !SAFE_ACTIVITY_STATUSES.has(status)) return [];
+    return [{ name, source, status, ...(timestamp ? { timestamp } : {}) }];
+  }).slice(0, 30);
+}
+
+function safeCitations(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const title = safeString(item.title || item.source, 160);
+    const url = safeString(item.url, 500);
+    const asOf = safeString(item.as_of, 40);
+    if (!title || !asOf) return [];
+    return [{ title, ...(url && /^https:\/\//i.test(url) ? { url } : {}), as_of: asOf }];
+  }).slice(0, 20);
+}
+
+function safeProposals(value) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object' || !SAFE_ACTIONS[item.entity]) return [];
+    const entity = item.entity;
+    const operation = item.operation;
+    if (!['create', 'update', 'delete'].includes(operation)) return [];
+    const payload = item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload)
+      ? Object.fromEntries(Object.entries(item.payload).filter(([key]) => SAFE_ACTIONS[entity].has(key)))
+      : {};
+    const summary = safeString(item.summary, 300) || `${operation} ${entity.replaceAll('_', ' ')}`;
+    if (operation !== 'create' && !safeString(item.target, 120)) return [];
+    return [{ entity, operation, ...(safeString(item.target, 120) ? { target: item.target } : {}), payload, summary,
+      ...(safeString(item.expires_at, 40) ? { expires_at: item.expires_at } : {}),
+      ...(Number.isInteger(item.version) ? { version: item.version } : {}) }];
+  }).slice(0, 10);
+}
+
 export function normalizeChatJob(raw) {
   if (!raw || typeof raw !== 'object') {
     return {
@@ -36,6 +93,9 @@ export function normalizeChatJob(raw) {
       answer: '',
       error: undefined,
       tools_used: [],
+      tool_activity: [],
+      citations: [],
+      proposed_actions: [],
       raw: raw ?? null,
     };
   }
@@ -49,6 +109,9 @@ export function normalizeChatJob(raw) {
     answer,
     error: raw.error,
     tools_used: tools,
+    tool_activity: safeActivity(raw.tool_activity),
+    citations: safeCitations(raw.citations),
+    proposed_actions: safeProposals(raw.proposed_actions),
     raw,
   };
 }
