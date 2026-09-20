@@ -126,7 +126,11 @@ def get_chat_job_route(user_id: str, job_id: str) -> dict:
         for citation in item.get("citations") or []:
             if not isinstance(citation, dict):
                 raise ValueError("invalid citation")
-            validated = tools_mod.record_citation(citation.get("source"), citation.get("as_of"), citation.get("title"))
+            validated = tools_mod.record_citation(
+                citation.get("source"), citation.get("as_of"), citation.get("title"),
+                domain=citation.get("domain"), url=citation.get("url"),
+                citation_id=citation.get("id"),
+            )
             if validated != citation:
                 raise ValueError("invalid citation shape")
             out["citations"].append(validated)

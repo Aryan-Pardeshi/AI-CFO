@@ -3,6 +3,7 @@
 import os
 import sys
 import types
+from types import SimpleNamespace
 
 import pytest
 
@@ -150,6 +151,98 @@ def test_real_tool_result_is_saved_as_citation_and_model_proposal_is_saved():
     )
     assert job["citations"] == [{"source": "holdings", "as_of": "2026-09-20"}]
     assert job["proposed_actions"][0]["entity"] == "goal"
+
+
+def test_runner_shares_firecrawl_guard_and_client_for_one_job():
+    """Search caps and result IDs must survive across the real runner invocation."""
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+    from agent.research_safety import ResearchGuard
+
+    class Research:
+        def __init__(self):
+            self.guard = ResearchGuard(max_searches=1, max_reads=1)
+            self.search_calls = 0
+            self.read_calls = 0
+
+        def search(self, query, **_kwargs):
+            self.search_calls += 1
+            self.guard.record_search()
+            self.guard.record_search_result("r1", "https://rbi.org.in/rules")
+            return {"source": "Firecrawl", "as_of": "2026-09-20", "citations": [
+                {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20",
+                 "url": "https://rbi.org.in/rules"}
+            ], "data": []}
+
+        def read(self, result_id, user_urls=()):
+            self.read_calls += 1
+            url = self.guard.validate_read(result_id, user_urls)
+            return {"source": "Firecrawl", "as_of": "2026-09-20", "citations": [
+                {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20", "url": url}
+            ], "data": {"content": "safe"}}
+
+    class ResearchAgent:
+        def stream_async(self, _prompt, **kwargs):
+            state = kwargs["invocation_state"]
+            context = SimpleNamespace(invocation_state=state)
+            first = tools_mod.web_search("latest RBI inflation guidance", tool_context=context)
+            read = tools_mod.read_web_page("r1", tool_context=context)
+            capped_search = tools_mod.web_search("latest RBI repo guidance", tool_context=context)
+            capped_read = tools_mod.read_web_page("r1", tool_context=context)
+            assert capped_search["error_code"] == "UPSTREAM_UNAVAILABLE"
+            assert capped_read["error_code"] == "UPSTREAM_UNAVAILABLE"
+
+            async def stream():
+                yield {"tool_result": first}
+                yield {"tool_result": read}
+                yield {"data": "Research complete."}
+
+            return stream()
+
+    research = Research()
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
+                                       "status": "QUEUED", "conversation_id": "c1"}
+    job = runner_mod.run_chat_job(
+        {**_payload(), "message": "Read https://rbi.org.in/rules and summarize."},
+        deps={"jobs_table": jobs, "conv_table": conv, "agent": ResearchAgent(),
+              "firecrawl_client": research, "tracker": tools_mod.ToolCallTracker(),
+              "publisher": lambda *a, **k: True},
+    )
+    assert job["status"] == "COMPLETED"
+    assert research.search_calls == 2  # the second call was attempted and capped
+    assert research.read_calls == 2
+    assert {item["id"] for item in job["citations"]} == {"r1"}
+    assert job["citations"][0]["url"] == "https://rbi.org.in/rules"
+
+
+def test_runner_extracts_only_safe_user_urls_into_invocation_state():
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    class CapturingAgent:
+        def __init__(self):
+            self.state = None
+
+        def stream_async(self, _prompt, **kwargs):
+            self.state = kwargs["invocation_state"]
+
+            async def stream():
+                yield {"data": "ok"}
+
+            return stream()
+
+    agent = CapturingAgent()
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
+                                       "status": "QUEUED", "conversation_id": "c1"}
+    runner_mod.run_chat_job(
+        {**_payload(), "message":
+         "Read https://rbi.org.in/rules and https://user:pass@evil.example/private."},
+        deps={"jobs_table": jobs, "conv_table": conv, "agent": agent,
+              "tracker": tools_mod.ToolCallTracker(), "publisher": lambda *a, **k: True},
+    )
+    assert agent.state["user_urls"] == ("https://rbi.org.in/rules",)
 
 
 def test_run_history_capped_at_10():
@@ -526,3 +619,150 @@ def test_async_handler_event_runs_job():
         res = ag.handler(_payload(), None)
     assert res == {"status": "ok"}
     assert seen["user_id"] == "user-a"
+
+
+def _research_job(agent, message, research=None):
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
+                                       "status": "QUEUED", "conversation_id": "c1"}
+    deps = {"jobs_table": jobs, "conv_table": conv, "agent": agent,
+            "tracker": tools_mod.ToolCallTracker(), "publisher": lambda *a, **k: True}
+    if research is not None:
+        deps["firecrawl_client"] = research
+    return runner_mod.run_chat_job({**_payload(), "message": message}, deps=deps)
+
+
+class _StreamOf:
+    def __init__(self, events):
+        self.events = events
+
+    def stream_async(self, _prompt, **_kwargs):
+        async def stream():
+            for event in self.events:
+                yield event
+            yield {"data": "done"}
+        return stream()
+
+
+def test_runner_keeps_firecrawl_citations_but_drops_unsafe_titles_not_the_citation():
+    good = {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20T10:00:00Z",
+            "url": "https://rbi.org.in/rules", "title": "RBI rules"}
+    empty_title = {"id": "r2", "source": "Firecrawl", "as_of": "2026-09-20T10:00:00Z",
+                   "url": "https://rbi.org.in/faq", "title": ""}
+    raw_title = {"id": "r3", "source": "Firecrawl", "as_of": "2026-09-20T10:00:00Z",
+                 "url": "https://sebi.gov.in/x", "title": "Search results: complete tool output"}
+    job = _research_job(_StreamOf([{"tool_result": {"source": "Firecrawl", "as_of": "2026-09-20T10:00:00Z",
+                                                    "citations": [good, empty_title, raw_title]}}]),
+                        "Summarize RBI rules")
+    assert job["status"] == "COMPLETED"
+    by_id = {item["id"]: item for item in job["citations"]}
+    assert set(by_id) == {"r1", "r2", "r3"}
+    assert by_id["r1"]["title"] == "RBI rules"
+    assert "title" not in by_id["r2"]
+    assert "title" not in by_id["r3"]
+    assert by_id["r3"]["url"] == "https://sebi.gov.in/x"
+    # A research tool_result never doubles as a bare source/as_of citation.
+    assert all("id" in item for item in job["citations"])
+
+
+@pytest.mark.parametrize("citation", [
+    {"source": "Firecrawl", "as_of": "2026-09-20T10:00:00Z", "url": "https://rbi.org.in/rules"},
+    {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20T10:00:00Z"},
+    {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20", "url": "javascript:alert(1)"},
+    {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20", "url": "http://rbi.org.in/rules"},
+    {"id": "r1", "source": "Firecrawl", "as_of": "yesterday", "url": "https://rbi.org.in/rules"},
+    {"id": "r\x001", "source": "Firecrawl", "as_of": "2026-09-20", "url": "https://rbi.org.in/rules"},
+    {"id": "<b>r1</b>", "source": "Firecrawl", "as_of": "2026-09-20", "url": "https://rbi.org.in/rules"},
+    {"id": "r1", "source": "evil", "as_of": "2026-09-20", "url": "https://rbi.org.in/rules"},
+    {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20", "url": "https://rbi.org.in/rules",
+     "result": {"markdown": "raw"}},
+    {"id": "r1", "source": "Firecrawl", "as_of": "2026-09-20", "url": "https://rbi.org.in/rules",
+     "account_number": "12345678"},
+    "not-a-dict",
+])
+def test_runner_rejects_malformed_or_unsafe_research_citations(citation):
+    job = _research_job(_StreamOf([{"tool_result": {"source": "Firecrawl", "as_of": "2026-09-20",
+                                                    "citations": [citation]}}]),
+                        "Summarize RBI rules")
+    assert job["status"] == "COMPLETED"
+    assert job["citations"] == []
+
+
+def test_runner_result_ids_do_not_leak_between_jobs(monkeypatch):
+    """A second job without the first job client must not read its result IDs."""
+    import integrations.firecrawl as firecrawl_mod
+    from agent import tools as tools_mod
+    from agent.research_safety import ResearchGuard
+
+    class FakeClient:
+        def __init__(self, http, api_key, guard=None, base_url=None):
+            self.guard = guard or ResearchGuard()
+
+        def search(self, query, **_kwargs):
+            self.guard.validate_query(query)
+            self.guard.record_search()
+            self.guard.record_search_result("r1", "https://rbi.org.in/rules")
+            return {"source": "Firecrawl", "as_of": "2026-09-20", "citations": [], "data": []}
+
+        def read(self, result_id_or_url, user_urls=()):
+            url = self.guard.validate_read(result_id_or_url, user_urls)
+            return {"source": "Firecrawl", "as_of": "2026-09-20", "citations": [],
+                    "data": {"url": url, "content": ""}}
+
+    monkeypatch.setattr(firecrawl_mod, "FirecrawlClient", FakeClient)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    seen = {}
+
+    class SearchAgent:
+        def stream_async(self, _prompt, **kwargs):
+            context = SimpleNamespace(invocation_state=kwargs["invocation_state"])
+            seen["search"] = tools_mod.web_search("latest RBI inflation guidance", tool_context=context)
+            seen["same_job_read"] = tools_mod.read_web_page("r1", tool_context=context)
+
+            async def stream():
+                yield {"data": "ok"}
+            return stream()
+
+    class ReadAgent:
+        def stream_async(self, _prompt, **kwargs):
+            context = SimpleNamespace(invocation_state=kwargs["invocation_state"])
+            seen["other_job_read"] = tools_mod.read_web_page("r1", tool_context=context)
+
+            async def stream():
+                yield {"data": "ok"}
+            return stream()
+
+    assert _research_job(SearchAgent(), "What did RBI say?")["status"] == "COMPLETED"
+    assert seen["search"]["source"] == "Firecrawl"
+    assert seen["same_job_read"]["data"]["url"] == "https://rbi.org.in/rules"
+    assert _research_job(ReadAgent(), "Read r1 please")["status"] == "COMPLETED"
+    assert seen["other_job_read"]["ok"] is False
+    assert seen["other_job_read"]["error_code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize("message, expected", [
+    ("See https://rbi.org.in/rules, https://rbi.org.in/rules and http://sebi.gov.in/x.",
+     ("https://rbi.org.in/rules", "http://sebi.gov.in/x")),
+    ("Read https://user:pass@evil.example/private and https://​evil.example/", ()),
+    ("Broken https:// and https:///nohost and https://example.com:0/ links", ()),
+    ("Control https://example.com/a\x07b here", ()),
+    ("Wrapped (https://example.com/path?q=1) and <https://example.com/b>",
+     ("https://example.com/path?q=1", "https://example.com/b")),
+    ("Not a link: javascript:alert(1) or ftp://files.example/x", ()),
+])
+def test_trusted_user_urls_are_normalized_and_hostile_ones_dropped(message, expected):
+    from agent import runner as runner_mod
+
+    assert runner_mod._trusted_user_urls(message) == expected
+
+
+def test_trusted_user_urls_are_capped_to_the_read_budget():
+    from agent import runner as runner_mod
+
+    message = " ".join(f"https://example.com/page{i}" for i in range(20))
+    urls = runner_mod._trusted_user_urls(message)
+    assert len(urls) == 8
+    assert urls[0] == "https://example.com/page0"

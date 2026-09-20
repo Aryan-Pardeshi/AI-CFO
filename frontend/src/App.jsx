@@ -15,6 +15,8 @@ import Advisory from './pages/dashboard/Advisory';
 import Milestones from './pages/dashboard/Milestones';
 import BalanceSheet from './pages/dashboard/BalanceSheet';
 import News from './pages/dashboard/News';
+import Landing from './pages/Landing';
+import MonthlyTracker from './pages/dashboard/MonthlyTracker';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, ProtectedRoute } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -26,9 +28,11 @@ function App() {
         <AuthProvider>
           <Router>
             <Routes>
+              {/* Public landing page (unauthenticated entry point) */}
+              <Route path="/" element={<Landing />} />
+
               {/* Auth & Onboarding Routes */}
-              <Route path="/" element={<Layout />}>
-                <Route index element={<Navigate to="/register" replace />} />
+              <Route element={<Layout />}>
                 <Route path="register" element={<Register />} />
                 <Route path="confirm" element={<ConfirmSignUp />} />
                 <Route path="login" element={<Login />} />
@@ -39,14 +43,15 @@ function App() {
               </Route>
 
               {/* Dashboard Routes (Protected) */}
-              <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+              <Route element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
                 <Route path="overview" element={<Overview />} />
                 <Route path="fire" element={<FireForecast />} />
                 <Route path="ai-advisory" element={<Advisory />} />
+                <Route path="monthly-tracker" element={<MonthlyTracker />} />
                 <Route path="milestones" element={<Milestones />} />
                 <Route path="balance-sheet" element={<BalanceSheet />} />
                 <Route path="news" element={<News />} />
-                {/* Redirect old dashboard path or index to overview */}
+                {/* Redirect old dashboard path to overview */}
                 <Route path="dashboard" element={<Navigate to="/overview" replace />} />
               </Route>
             </Routes>

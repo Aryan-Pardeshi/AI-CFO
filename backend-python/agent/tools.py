@@ -30,6 +30,17 @@ except Exception:  # pragma: no cover
 
 TOOL_CAP = 30
 
+# External adapters load lazily, so the default registry does not list them.
+# Activity records are UI labels only, and this static allowlist lets the runner
+# name them without a Secrets Manager or credential lookup. Kept in lockstep
+# with get_tool_registry() by test_activity_allowlist_matches_the_real_external_registry.
+EXTERNAL_TOOL_NAMES = frozenset({
+    "search_securities", "get_security_overview", "get_security_risk_metrics",
+    "analyze_portfolio_fit", "get_security_news",
+    "search_mutual_funds", "get_mutual_fund_nav",
+    "web_search", "read_web_page",
+})
+
 SAFE_ACTION_ENTITIES = frozenset({
     "profile", "dashboard_financials", "holding", "goal", "loan",
     "fire_scenario", "transaction_category",
@@ -141,7 +152,7 @@ def record_activity(tool_name: str, status: str) -> dict:
         registered = get_tool_registry()
     except NameError:  # pragma: no cover
         registered = {}
-    if tool_name not in registered:
+    if tool_name not in registered and tool_name not in EXTERNAL_TOOL_NAMES:
         raise ValueError("unknown tool activity")
     if status not in {"started", "completed", "failed"}:
         raise ValueError("invalid tool activity status")
@@ -149,7 +160,8 @@ def record_activity(tool_name: str, status: str) -> dict:
 
 
 def record_citation(source: str, as_of: str, title: str | None = None,
-                    *, domain: str | None = None, url: str | None = None) -> dict:
+                    *, domain: str | None = None, url: str | None = None,
+                    citation_id: str | None = None) -> dict:
     """Build a citation without retaining a raw tool response or account data."""
     source = _safe_string(source, field="source")
     if source not in _KNOWN_CITATION_SOURCES:
@@ -157,7 +169,14 @@ def record_citation(source: str, as_of: str, title: str | None = None,
     as_of = _safe_string(as_of, field="as_of")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T[^\s]{1,30})?", as_of):
         raise ValueError("citation date must be ISO formatted")
-    result = {"source": source, "as_of": as_of}
+    result = {}
+    if citation_id is not None:
+        citation_id = _safe_string(citation_id, field="id")
+        # Result ids are opaque handles, never free text from the page.
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", citation_id):
+            raise ValueError("citation id is invalid")
+        result["id"] = citation_id
+    result.update({"source": source, "as_of": as_of})
     if title is not None:
         title = _safe_string(title, field="title")
         if _RAW_MARKERS.search(title):
@@ -173,6 +192,8 @@ def record_citation(source: str, as_of: str, title: str | None = None,
         if not re.fullmatch(r"https://[A-Za-z0-9.-]{1,100}(?:/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,180})?", url):
             raise ValueError("citation URL is invalid")
         result["url"] = url
+    if source == "Firecrawl" and (citation_id is None or url is None):
+        raise ValueError("Firecrawl citations need id and URL")
     _assert_safe_metadata(result)
     return result
 
@@ -818,10 +839,16 @@ def get_mutual_fund_nav(scheme_code: str, tool_context=None) -> dict:
 
 
 def _research_client(tool_context):
-    client = getattr(tool_context, "invocation_state", {}).get("firecrawl_client") if tool_context else None
+    state = getattr(tool_context, "invocation_state", None) if tool_context else None
+    client = state.get("firecrawl_client") if isinstance(state, dict) else None
     if client is None:
         from integrations.firecrawl import FirecrawlClient
         client = FirecrawlClient(http=_requests_client(), api_key=os.environ.get("FIRECRAWL_API_KEY"))
+        if isinstance(state, dict):
+            # One client (and therefore one ResearchGuard) per job: search/read caps
+            # and same-job result IDs must survive across tool calls, and a fresh job
+            # gets a fresh state dict so nothing leaks between jobs.
+            state["firecrawl_client"] = client
     return client
 
 

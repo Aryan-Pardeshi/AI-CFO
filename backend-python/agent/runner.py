@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SAFE_CHAT_ERROR = "Unable to complete this chat right now. Please try again."
+_CITATION_FIELDS = frozenset({"id", "source", "as_of", "title", "domain", "url"})
 KILO_PROVIDER_ERROR_NAMES = frozenset({
     "APIError",
     "APIConnectionError",
@@ -190,6 +191,42 @@ def _strands_messages(history: list[dict], message: str) -> list[dict]:
     return messages
 
 
+MAX_USER_URLS = 8  # matches the per-job Firecrawl read budget
+
+
+def _trusted_user_urls(message: str) -> tuple[str, ...]:
+    """Extract only normalized HTTP(S) URLs from the authenticated user turn.
+
+    The current user message is the only trusted text source: history, tool
+    output, and model text never populate this allowlist. normalize_url drops
+    credentials, control/hidden characters, whitespace, and malformed hosts.
+    """
+    from agent.research_safety import normalize_url
+
+    found: list[str] = []
+    for candidate in re.findall(r"https?://[^\s<>\"']+", message or "", flags=re.I):
+        candidate = candidate.rstrip(".,;:!?)]}\"")
+        try:
+            normalized = normalize_url(candidate)
+        except ValueError:
+            continue
+        if normalized not in found:
+            found.append(normalized)
+        if len(found) >= MAX_USER_URLS:
+            break
+    return tuple(found)
+
+
+def _job_firecrawl_client(deps):
+    client = deps.get("firecrawl_client")
+    if client is not None:
+        return client
+    if not os.environ.get("FIRECRAWL_API_KEY"):
+        return None
+    from integrations.firecrawl import FirecrawlClient
+    return FirecrawlClient(http=__import__("requests"), api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
 def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
     """Execute one chat job. Test doubles go through `deps`; never live model in tests."""
     from agent import prompt as prompt_mod
@@ -227,6 +264,16 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
                    for r in history_rows]
         store_mod.save_message(conv_table, user_id, conversation_id, "user", message)
         start_ms = __import__("time").monotonic()
+        invocation_state = {
+            "user_id": user_id, "tracker": tracker, "history": history,
+            "metadata": metadata, "message": message,
+            "user_urls": _trusted_user_urls(message),
+        }
+        firecrawl_client = _job_firecrawl_client(deps)
+        if firecrawl_client is not None:
+            # One client owns one ResearchGuard for the whole job. This keeps
+            # search/read caps and same-job result IDs intact across calls.
+            invocation_state["firecrawl_client"] = firecrawl_client
         agent = deps.get("agent")
         uses_default_agent = agent is None and "agent_factory" not in deps
         if agent is None:
@@ -235,7 +282,8 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
 
         try:
             answer, tools_used = _invoke(agent, message, history, user_id, tracker,
-                                         channel, publisher, deps, metadata, persist_progress)
+                                         channel, publisher, deps, metadata, persist_progress,
+                                         invocation_state)
         except Exception as exc:
             if not _is_kilo_provider_error(exc):
                 raise
@@ -253,7 +301,7 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
                     fallback_agent = fallback_factory()
                     answer, tools_used = _invoke(
                         fallback_agent, message, history, user_id, tracker, channel, publisher, deps,
-                        metadata, persist_progress
+                        metadata, persist_progress, invocation_state
                     )
                     break
                 except Exception as fallback_exc:
@@ -301,10 +349,14 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
 
 
 def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
-            metadata=None, persist_progress=None):
+            metadata=None, persist_progress=None, invocation_state=None):
     """Run the agent with deterministic cap + progress events. Returns (answer, tools_used)."""
     tools_used: list[str] = []
     metadata = metadata if metadata is not None else {"tool_activity": [], "citations": [], "proposed_actions": []}
+    invocation_state = invocation_state or {
+        "user_id": user_id, "tracker": tracker, "history": history,
+        "metadata": metadata, "message": message, "user_urls": _trusted_user_urls(message),
+    }
     from agent import tools as tools_mod
 
     def _note_tool(name: str, phase: str):
@@ -318,6 +370,30 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
             pass
         if persist_progress:
             persist_progress()
+
+    def _save_citation(citation):
+        """Persist only validated citation metadata, never raw research output."""
+        if not isinstance(citation, dict) or set(citation) - _CITATION_FIELDS:
+            # Unknown keys mean a raw payload or identity field hitched a ride.
+            return
+        title = citation.get("title") or None
+        for attempt_title in ((title,) if title is None else (title, None)):
+            try:
+                item = tools_mod.record_citation(
+                    citation.get("source"),
+                    citation.get("as_of"),
+                    attempt_title,
+                    domain=citation.get("domain"),
+                    url=citation.get("url"),
+                    citation_id=citation.get("id"),
+                )
+            except (TypeError, ValueError):
+                # An untrusted page title that trips the sanitizer must not
+                # cost the user the citation itself; retry once without it.
+                continue
+            if item not in metadata["citations"]:
+                metadata["citations"].append(item)
+            return
 
     # Test-double / fallback path: no stream_async means a simple double.
     if not hasattr(agent, "stream_async"):
@@ -374,9 +450,7 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
         try:
             stream = agent.stream_async(
                 _strands_messages(history, message),
-                invocation_state={"user_id": user_id, "tracker": tracker,
-                                  "history": history, "metadata": metadata,
-                                  "message": message},
+                invocation_state=invocation_state,
             )
         except TypeError:
             stream = agent.stream_async(_strands_messages(history, message))
@@ -388,24 +462,16 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
                 _start_tool(event.get("tool_start"))
                 _finish_tool(event.get("tool_end"))
                 for citation in event.get("citations", []) if isinstance(event.get("citations"), list) else []:
-                    if isinstance(citation, dict) and citation.get("source") and citation.get("as_of"):
-                        try:
-                            item = tools_mod.record_citation(citation["source"], citation["as_of"], citation.get("title"))
-                            if item not in metadata["citations"]:
-                                metadata["citations"].append(item)
-                        except ValueError:
-                            pass
+                    _save_citation(citation)
                 tool_result = event.get("tool_result")
                 if isinstance(tool_result, dict):
-                    try:
-                        source = tool_result.get("source")
-                        as_of = tool_result.get("as_of")
-                        if source and as_of:
-                            item = tools_mod.record_citation(source, as_of)
-                            if item not in metadata["citations"]:
-                                metadata["citations"].append(item)
-                    except ValueError:
-                        pass
+                    explicit = tool_result.get("citations")
+                    if isinstance(explicit, list):
+                        for citation in explicit:
+                            _save_citation(citation)
+                    elif tool_result.get("source") and tool_result.get("as_of"):
+                        # Non-research tools expose only the compact source/as_of pair.
+                        _save_citation({"source": tool_result["source"], "as_of": tool_result["as_of"]})
                 action = event.get("proposed_action")
                 if isinstance(action, dict):
                     try:

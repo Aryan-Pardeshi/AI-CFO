@@ -60,6 +60,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Native select menus use a light popup on Windows even in dark mode. */
+select option {
+  background-color: #FFFFFF;
+  color: #1C1917;
+}
+
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-serif);
   font-weight: 600;

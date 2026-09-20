@@ -2,8 +2,11 @@
 from datetime import datetime, timezone
 import json
 import os
+import re
 
 from agent.research_safety import ResearchGuard, clean_web_content, normalize_url, spotlight
+
+_SAFE_RESULT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 class FirecrawlError(RuntimeError):
@@ -52,7 +55,10 @@ class FirecrawlClient:
         for index, row in enumerate(rows):
             if not isinstance(row, dict) or not row.get("url"):
                 continue
-            result_id = str(row.get("id") or f"search-{index}")
+            # Upstream ids are opaque handles; anything else falls back to our own index id
+            # so a hostile id can never ride into citations or the model context.
+            upstream_id = str(row.get("id") or "")
+            result_id = upstream_id if _SAFE_RESULT_ID.fullmatch(upstream_id) else f"search-{index}"
             url = normalize_url(row["url"])
             self.guard.record_search_result(result_id, url)
             out.append({"result_id": result_id, "title": row.get("title", ""), "url": url,
@@ -72,8 +78,12 @@ class FirecrawlClient:
         as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         citation_id = result_id_or_url if result_id_or_url in self.guard.results else "user-url"
         citation = {"id": str(citation_id), "source": "Firecrawl", "as_of": as_of, "url": url}
+        # A tripwire hit quarantines the whole page: the model gets the citation
+        # and the warning, never the page text, not even inside the spotlight wrapper.
+        quarantined = bool(warnings)
+        content = "" if quarantined else spotlight(cleaned, url)
         return {"source": "Firecrawl", "as_of": as_of, "warnings": warnings, "citations": [citation],
-                "data": {"url": url, "content": spotlight(cleaned, url)}}
+                "data": {"url": url, "content": content, "quarantined": quarantined}}
 
 
 def _secret_token():

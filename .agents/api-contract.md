@@ -126,6 +126,44 @@ CRUD behavior (implemented in `backend-node/`):
   `annual_rate`, `tenure_months`.
 - If both `risk_answers` and `risk_score` are sent, `risk_score` must equal their sum.
 
+#### Credit-card loan metadata (`CREDIT_CARD` only)
+
+`loans` rows may additionally carry three **optional** fields, and only when the loan's
+**effective type is `CREDIT_CARD`**:
+
+| Field | Type | Bounds |
+|---|---|---|
+| `issuer` | string | trimmed, non-blank, ≤ 120 chars |
+| `credit_limit_paise` | integer paise | 0 ≤ x ≤ ₹10,00,00,000 (`10000000000` paise) |
+| `payment_due_day` | integer | 1–31 (day-of-month) |
+
+Rules (all enforced server-side, never trusting the client):
+
+- **Effective type** on `POST` is the request's `loan_type`. On `PUT` (a partial update) it is the
+  request's `loan_type` when present, otherwise the **stored** loan's `loan_type`. A partial update
+  that sets any card field on a non-card loan is a `VALIDATION_ERROR` — it never silently persists.
+- **Switching a card to another loan type clears all three fields**, in the same update, even when
+  the client didn't mention them. Stale card metadata must never survive on a non-card loan.
+- Sending `null` for a card field **clears** it; omitting it leaves it unchanged (partial-update
+  semantics, same as every other loan field).
+- **Backward compatible**: existing loans with no card metadata stay valid and are returned
+  unchanged — these fields are never back-filled or defaulted.
+- Ownership is the ordinary `user_id`-partitioned `Query`/`UpdateItem` path keyed on the verified
+  Cognito `sub`. An unknown `loan_id`, or another user's, is a `404` — including on an update that
+  only touches card fields.
+
+#### `monthly_emi_paise` (read-only, `GET /loans` list items)
+
+Each item in the `GET /loans` array additionally carries `monthly_emi_paise`: the loan's monthly
+EMI in **integer paise**, computed server-side by the single tested implementation of the locked
+reducing-balance formula (`backend-node/src/services/emi.js`, per
+[finance-rules.md](finance-rules.md#loans--emi)) — the same helper `/dashboard/profile` already uses.
+
+- It is `null` when the stored loan has no usable `principal_paise`/`outstanding_paise`,
+  `annual_rate`, or `tenure_months`. Never a guess, never 0-as-unknown.
+- It is **read-only**: it is not stored, and sending it on `POST`/`PUT` is rejected as an unknown
+  field like any other. This exists so no UI has to re-implement EMI in the browser.
+
 ### Node Lambda (dashboard and market compatibility routes) — `/dashboard/*`, `/portfolio/*`
 ```text
 GET  /dashboard/profile
@@ -239,9 +277,9 @@ POST /calculators/tax          POST /calculators/capital-gains
 POST /calculators/insurance    POST /calculators/credit-card-payoff
 POST /statements               POST /statements/{job_id}/process
 GET  /statements/{job_id}      POST /statements/{job_id}/commit
-GET  /cashflow/summary
+GET  /cashflow/summary         → months[] + totals, each with a per-category breakdown
 POST /fire/scenarios           → 201 after browser-confirmed, authenticated create
-PATCH /transactions/{txn_id}/category → 200 after browser-confirmed category update; requires version
+PATCH /transactions/{txn_id}/category → 200 after browser-confirmed category update; requires version and a DynamoDB conditional update on the authenticated owner key (stale writes return 409)
 ```
 Instrument keys contain `|` (e.g. `NSE_EQ|INE040A01034`) — always in the **query string**,
 never a path parameter.
@@ -328,6 +366,25 @@ outflow.
 Same age-stage assumptions as FIRE (single source in `finance/fire.py`);
 pre-`fire_age` years accumulate, later years draw down (expenses + goals +
 EMIs out). `years` 1–80, default 30.
+
+**`GET /cashflow/summary`** (`CashflowSummary`)
+```json
+{
+  "months": [{"month": "2026-08", "income_paise": 8500000, "expense_paise": 5000000,
+    "net_paise": 3500000,
+    "categories": [{"category": "RENT", "income_paise": 0, "expense_paise": 2500000, "net_paise": -2500000}]}],
+  "totals": {"income_paise": 8500000, "expense_paise": 5000000, "net_paise": 3500000,
+    "categories": [{"category": "RENT", "income_paise": 0, "expense_paise": 2500000, "net_paise": -2500000}]},
+  "current_balance_paise": 12000050
+}
+```
+Built **only** from committed `transactions` rows by the pure, tested
+`statements/summaries.py::summarize_transactions` — the same function the statement-commit summary
+uses, so the two can never disagree. `categories[].category` is the stored `txn_category` value or
+`null` for committed rows that carry none; the API never invents a label, and the UI decides how to
+show `null`. Buckets sort by `expense_paise` descending, then `category` ascending with `null`
+last. A user with no committed transactions gets `months: []`, zero totals, `categories: []` and
+`current_balance_paise: null` — not fabricated activity.
 
 **`POST /chat`**
 ```json

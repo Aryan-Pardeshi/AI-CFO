@@ -35,12 +35,21 @@ describe('Cognito auth state', () => {
   });
 
   test('ported frontend contains no legacy localhost API or localStorage identity', () => {
+    // Every page transplanted from the old fork lives here. Add a page to this list the moment
+    // it is ported — this is the standing guard against the legacy Express/localhost:5000 and
+    // localStorage-identity patterns that branch used instead of Cognito.
     const files = [
       'src/pages/ManualEntry.jsx',
       'src/pages/CSVUpload.jsx',
+      'src/pages/Landing.jsx',
+      'src/pages/Login.jsx',
       'src/pages/dashboard/Overview.jsx',
       'src/pages/dashboard/BalanceSheet.jsx',
       'src/pages/dashboard/News.jsx',
+      'src/pages/dashboard/MonthlyTracker.jsx',
+      'src/pages/dashboard/Milestones.jsx',
+      'src/components/ui/LoadingScreen.jsx',
+      'src/components/DashboardLayout.jsx',
       'src/context/AuthContext.jsx',
     ];
     const source = files.map((file) => fs.readFileSync(path.resolve(file), 'utf8')).join('\n');
@@ -48,6 +57,8 @@ describe('Cognito auth state', () => {
     expect(source).not.toContain('localhost:5000');
     expect(source).not.toContain('/api/auth');
     expect(source).not.toContain("localStorage.setItem('userEmail'");
+    // Identity is the verified Cognito sub, server-side. No transplanted page may send one.
+    expect(source).not.toMatch(/user_id\s*:/);
   });
 
   test('keeps the canonical eight-step onboarding at /onboarding', () => {

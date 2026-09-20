@@ -4,6 +4,7 @@ import { Hub } from 'aws-amplify/utils';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import GoogleIcon from '../components/GoogleIcon';
+import LoadingScreen from '../components/ui/LoadingScreen';
 import { getMe } from '../lib/api.js';
 import { getCurrentAuthUser, signInUser, signInWithGoogleRedirect } from '../lib/auth.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -16,6 +17,8 @@ const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD;
 const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [resolveStage, setResolveStage] = useState('');
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -33,20 +36,32 @@ const Login = () => {
   }, []);
 
   async function afterAuth() {
+    // Shown ONLY after Cognito reports success, while profile/onboarding/demo
+    // state resolves over the real API. No timers: the screen clears exactly
+    // when routing is known or a genuine error occurs. Each stage string is
+    // set immediately before the real await it describes.
+    setResolving(true);
     try {
+      setResolveStage('Verifying your session…');
       await login();
+      setResolveStage('Loading your profile…');
       const profile = await getMe();
-      if (profile && typeof profile.onboarding_step === 'number') {
-        navigate(profile.onboarded ? '/overview' : '/onboarding', { replace: true });
-      } else if (!profile || profile.onboarded === false) {
-        navigate('/onboarding', { replace: true });
-      } else {
-        navigate('/overview', { replace: true });
-      }
+      // A demo login is just a seeded Cognito user with a real profile — it
+      // resolves through the same onboarded/not-onboarded branches as any
+      // other account, landing on /overview once onboarded. There is no
+      // separate demo dashboard route in this app to route to.
+      navigate(profile?.onboarded ? '/overview' : '/onboarding', { replace: true });
     } catch (err) {
+      // GET /me 404s until the first PUT /me/profile — the documented
+      // "no profile yet" case. That means onboarding, not an error.
       if (err && (err.status === 404 || err.code === 'NOT_FOUND')) {
         navigate('/onboarding', { replace: true });
+        return;
       }
+      setError(err?.message || 'Could not load your profile. Please try again.');
+    } finally {
+      setResolving(false);
+      setResolveStage('');
     }
   }
 
@@ -108,6 +123,8 @@ const Login = () => {
   };
 
   return (
+    <>
+      {resolving && <LoadingScreen message="Signing you in…" stage={resolveStage} />}
     <div style={{
       width: '100%',
       maxWidth: '400px',
@@ -158,6 +175,7 @@ const Login = () => {
         </Link>
       </div>
     </div>
+    </>
   );
 };
 

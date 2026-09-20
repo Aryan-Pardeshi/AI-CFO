@@ -3,16 +3,44 @@ import re
 import secrets
 from urllib.parse import urlsplit, urlunsplit
 
-_INJECTION = re.compile(r"(?:ignore\s+(?:all|previous)|system\s*[:：]|assistant\s*[:：]|tool[_ ]?call|function\s*call|reveal\s+(?:the\s+)?system|do\s+not\s+tell)", re.I)
+_INJECTION = re.compile(
+    r"(?:ignore\s+(?:all|previous)|forget\s+(?:the\s+)?(?:earlier|previous|all|your)"
+    r"|system\s*[:：]|assistant\s*[:：]|system\s+prompt|you\s+are\s+now"
+    r"|tool[_ ]?call|function\s*call|reveal\s+(?:the\s+)?system|do\s+not\s+tell"
+    r"|<\|?\s*/?\s*(?:im_start|im_end|system|assistant|inst)\b"
+    # Our own tool names inside page text are an instruction, never content.
+    r"|\b(?:propose_[a-z_]+|read_web_page|web_search|calculate_fire|get_financial_snapshot"
+    r"|get_net_worth|get_portfolio_analysis|get_holdings|get_profile|get_loans|get_goals)\b)",
+    re.I,
+)
 _PRIVATE = re.compile(r"(?:net\s*worth|income|salary|account|portfolio\s+value|bank\s+balance|\b\d{8,}\b|₹\s*[\d,]+)", re.I)
 _CONTROL = re.compile(r"[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]")
+# Markup that can only serve remote loading, hidden text, or fake tool traffic.
+_MARKUP_TRIPWIRE = re.compile(r"!\[|<img\b|<!--|<tool_call>|<script\b|<iframe\b", re.I)
+# A link or image target whose query parameters name personal financial data is an
+# exfiltration channel (EchoLeak-style), not a reference.
+_EXFIL_TARGET = re.compile(
+    r"(?:\]\(|src\s*=\s*[\"']?|href\s*=\s*[\"']?)[^)\s\"'>]*[?&]"
+    r"(?:net_?worth|income|salary|balance|account\w*|portfolio\w*|email|phone|mobile"
+    r"|token|secret|password|api_?key|user_?id|sub)\s*=",
+    re.I,
+)
 
 
 def clean_web_content(text, max_chars=12000):
     text = str(text or "")
     warnings = []
-    if _INJECTION.search(text) or re.search(r"!\[|<img\b|<!--|<tool_call>|\u200b|[\u202a-\u202e]", text, re.I):
+    hostile = bool(
+        _INJECTION.search(text)
+        or _MARKUP_TRIPWIRE.search(text)
+        or _CONTROL.search(text)
+        or _EXFIL_TARGET.search(text)
+    )
+    if hostile:
         warnings.append("Suspicious instruction-like text was detected in the page")
+        # Never expose a partially cleaned hostile page to the model. The
+        # caller may retain the warning, but the content is quarantined.
+        return "", warnings
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
@@ -31,6 +59,9 @@ def spotlight(text, url):
 
 def normalize_url(value):
     if not isinstance(value, str) or not value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("Invalid URL")
+    if _CONTROL.search(value):
+        # Zero-width, bidi, and BOM characters hide the real destination.
         raise ValueError("Invalid URL")
     try:
         parts = urlsplit(value)

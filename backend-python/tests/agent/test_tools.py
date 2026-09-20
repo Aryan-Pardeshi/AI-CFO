@@ -128,15 +128,52 @@ def test_citations_allow_safe_firecrawl_fields_but_reject_raw_labels():
 
     citation = tools.record_citation(
         "Firecrawl", "2026-09-20", title="RBI rules", domain="rbi.org.in",
-        url="https://rbi.org.in/rules"
+        url="https://rbi.org.in/rules", citation_id="result-1"
     )
     assert citation["domain"] == "rbi.org.in"
+    assert citation["id"] == "result-1"
+    with pytest.raises(ValueError):
+        tools.record_citation("Firecrawl", "2026-09-20", url="https://rbi.org.in/rules")
     with pytest.raises(ValueError):
         tools.record_citation("my secret is abc", "2026-09-20")
     with pytest.raises(ValueError):
         tools.record_citation("api_key", "2026-09-20")
     with pytest.raises(ValueError):
         tools.record_citation("Firecrawl", "2026-09-20", title="complete tool output holdings allocation")
+
+
+def test_activity_allows_a_safe_external_tool_name_without_a_secret_lookup(monkeypatch):
+    """External activity must not fail just because registry discovery is lazy."""
+    import integrations.firecrawl as firecrawl_mod
+    import integrations.upstox as upstox_mod
+    from agent import tools
+
+    def _boom(*_args, **_kwargs):  # pragma: no cover - only runs on regression
+        raise AssertionError("recording activity must never reach Secrets Manager")
+
+    monkeypatch.setattr(firecrawl_mod, "_secret_token", _boom)
+    monkeypatch.setattr(upstox_mod, "_secret_token", _boom)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    monkeypatch.delenv("UPSTOX_ANALYTICS_TOKEN", raising=False)
+
+    for name in ("web_search", "read_web_page", "search_securities", "get_mutual_fund_nav"):
+        assert tools.record_activity(name, "started") == {"tool": name, "status": "started"}
+    assert tools.record_activity("web_search", "completed")["status"] == "completed"
+    with pytest.raises(ValueError):
+        tools.record_activity("web_search", "pending")
+    with pytest.raises(ValueError):
+        tools.record_activity("exfiltrate_everything", "started")
+
+
+def test_activity_allowlist_matches_the_real_external_registry():
+    """The static allowlist must not drift away from the lazily-loaded tools."""
+    from agent import tools
+
+    external = set(tools.get_tool_registry(
+        include_external=True,
+        external_clients={"upstox": object(), "firecrawl": object()},
+    )) - set(tools.get_tool_registry())
+    assert external == set(tools.EXTERNAL_TOOL_NAMES)
 
 
 def test_registry_exposes_grounded_calculators_and_account_reads():
@@ -260,3 +297,45 @@ def test_mutual_fund_tools_register_and_preserve_source_as_of(monkeypatch):
     assert tools.get_mutual_fund_nav("1", tool_context=ctx)["as_of"] == "2026-09-20"
     names = set(tools.get_tool_registry(include_external=True, external_clients={"mfapi": Mf()}))
     assert {"search_mutual_funds", "get_mutual_fund_nav"} <= names
+
+
+def test_research_client_is_created_once_per_job_and_never_shared_across_jobs(monkeypatch):
+    """Without an injected client, the tool layer must still keep one guard per job."""
+    import integrations.firecrawl as firecrawl_mod
+    from agent import tools
+    from agent.research_safety import ResearchGuard
+
+    built = []
+
+    class FakeClient:
+        def __init__(self, http, api_key, guard=None, base_url=None):
+            self.guard = guard or ResearchGuard(max_searches=1, max_reads=8)
+            built.append(self)
+
+        def search(self, query, source="web", recency=None, country="IN"):
+            self.guard.validate_query(query)
+            self.guard.record_search()
+            self.guard.record_search_result("r1", "https://rbi.org.in/rules")
+            return {"source": "Firecrawl", "as_of": "2026-09-20", "citations": [], "data": []}
+
+        def read(self, result_id_or_url, user_urls=()):
+            url = self.guard.validate_read(result_id_or_url, user_urls)
+            return {"source": "Firecrawl", "as_of": "2026-09-20", "citations": [],
+                    "data": {"url": url, "content": ""}}
+
+    monkeypatch.setattr(firecrawl_mod, "FirecrawlClient", FakeClient)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+
+    job_one = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
+    first = tools.web_search("latest RBI inflation guidance", tool_context=job_one)
+    assert first["source"] == "Firecrawl"
+    capped = tools.web_search("latest RBI repo guidance", tool_context=job_one)
+    assert capped["ok"] is False and capped["error_code"] == "UPSTREAM_UNAVAILABLE"
+    read = tools.read_web_page("r1", tool_context=job_one)
+    assert read["data"]["url"] == "https://rbi.org.in/rules"
+    assert len(built) == 1
+
+    job_two = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
+    foreign = tools.read_web_page("r1", tool_context=job_two)
+    assert foreign["ok"] is False and foreign["error_code"] == "VALIDATION_ERROR"
+    assert len(built) == 2

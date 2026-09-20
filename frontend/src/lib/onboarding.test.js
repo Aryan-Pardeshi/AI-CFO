@@ -17,6 +17,7 @@ import {
   deserializeStep3Draft,
   serializeStep3Draft,
   parseRupeesField,
+  validateCardFields,
 } from './onboarding.js';
 
 describe('ageFromDob', () => {
@@ -259,5 +260,33 @@ describe('payload builders carry backend-required fields', () => {
   test('loan payload has name, loan_type, outstanding_paise, annual_rate, tenure_months', () => {
     const p = buildLoanPayload({ loanType: 'HOME', name: 'Home loan', principalPaise: 500000000, outstandingPaise: 420000000, annualRate: 8.5, tenureMonths: 240, startDate: '2020-01-01', rateType: 'FIXED' });
     expect(p).toMatchObject({ name: 'Home loan', loan_type: 'HOME', outstanding_paise: 420000000, annual_rate: 8.5, tenure_months: 240 });
+  });
+  test('non-credit-card loan payload never carries card keys', () => {
+    const p = buildLoanPayload({ loanType: 'HOME', name: 'Home loan', principalPaise: 1, outstandingPaise: 1, annualRate: 0.08, tenureMonths: 12, startDate: '2020-01-01', rateType: 'FIXED', issuer: 'X', creditLimitPaise: 1, paymentDueDay: 5 });
+    expect(p).not.toHaveProperty('issuer');
+    expect(p).not.toHaveProperty('credit_limit_paise');
+    expect(p).not.toHaveProperty('payment_due_day');
+  });
+  test('credit-card loan payload carries card metadata', () => {
+    const p = buildLoanPayload({ loanType: 'CREDIT_CARD', name: 'Card', principalPaise: 1, outstandingPaise: 1, annualRate: 0.08, tenureMonths: 12, startDate: '2020-01-01', rateType: 'FIXED', issuer: 'HDFC', creditLimitPaise: 30000000, paymentDueDay: 5 });
+    expect(p).toMatchObject({ issuer: 'HDFC', credit_limit_paise: 30000000, payment_due_day: 5 });
+  });
+});
+
+describe('validateCardFields', () => {
+  test('non-card loans ignore card inputs', () => {
+    expect(validateCardFields({ loanType: 'HOME', issuer: 'x'.repeat(200), creditLimit: 'bad', paymentDueDay: '99' })).toEqual({});
+  });
+  test('flags long issuer, bad limit, and out-of-range due day', () => {
+    const errors = validateCardFields({ loanType: 'CREDIT_CARD', issuer: 'x'.repeat(121), creditLimit: '1.005', paymentDueDay: '0' });
+    expect(errors.issuer).toMatch(/120/);
+    expect(errors.credit_limit).toBeTruthy();
+    expect(errors.payment_due_day).toMatch(/1 to 31/);
+  });
+  test('accepts empty optional card fields', () => {
+    expect(validateCardFields({ loanType: 'CREDIT_CARD', issuer: '', creditLimit: '', paymentDueDay: '' })).toEqual({});
+  });
+  test('rejects due day 32', () => {
+    expect(validateCardFields({ loanType: 'CREDIT_CARD', paymentDueDay: '32' }).payment_due_day).toBeTruthy();
   });
 });

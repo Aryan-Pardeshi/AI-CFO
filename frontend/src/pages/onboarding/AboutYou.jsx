@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
-import { errStyle, inputStyle } from '../../components/onboarding/styles.js';
+import { errStyle, inputStyle, nativeSelectOptionStyle } from '../../components/onboarding/styles.js';
 import { ageFromDob, parseRupeesField, paiseToRupees } from '../../lib/onboarding.js';
 
 const AboutYou = ({ profile, saveAndAdvance, goBack }) => {
@@ -81,22 +81,22 @@ const AboutYou = ({ profile, saveAndAdvance, goBack }) => {
           <div>
             <label style={{ fontSize: '0.8rem' }}>Employment type</label>
             <select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} style={inputStyle}>
-              <option value="">Not answered</option>
-              <option value="SALARIED">Salaried</option>
-              <option value="SELF_EMPLOYED">Self-employed</option>
-              <option value="BUSINESS_OWNER">Business owner</option>
-              <option value="STUDENT">Student</option>
-              <option value="RETIRED">Retired</option>
-              <option value="OTHER">Other</option>
+              <option value="" style={nativeSelectOptionStyle}>Not answered</option>
+              <option value="SALARIED" style={nativeSelectOptionStyle}>Salaried</option>
+              <option value="SELF_EMPLOYED" style={nativeSelectOptionStyle}>Self-employed</option>
+              <option value="BUSINESS_OWNER" style={nativeSelectOptionStyle}>Business owner</option>
+              <option value="STUDENT" style={nativeSelectOptionStyle}>Student</option>
+              <option value="RETIRED" style={nativeSelectOptionStyle}>Retired</option>
+              <option value="OTHER" style={nativeSelectOptionStyle}>Other</option>
             </select>
           </div>
           <div>
             <label style={{ fontSize: '0.8rem' }}>City tier</label>
             <select value={cityTier} onChange={(e) => setCityTier(e.target.value)} style={inputStyle}>
-              <option value="">Not answered</option>
-              <option value="METRO">Metro</option>
-              <option value="TIER_2">Tier 2</option>
-              <option value="TIER_3">Tier 3</option>
+              <option value="" style={nativeSelectOptionStyle}>Not answered</option>
+              <option value="METRO" style={nativeSelectOptionStyle}>Metro</option>
+              <option value="TIER_2" style={nativeSelectOptionStyle}>Tier 2</option>
+              <option value="TIER_3" style={nativeSelectOptionStyle}>Tier 3</option>
             </select>
           </div>
           <div>
