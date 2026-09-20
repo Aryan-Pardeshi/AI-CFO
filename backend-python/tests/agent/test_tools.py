@@ -25,3 +25,18 @@ def test_propose_action_rejects_malformed_or_identity_bearing_actions():
         tools.propose_action("user", "create", payload={"name": "x"})
     with pytest.raises(ValueError):
         tools.propose_action("goal", "create", payload={"user_id": "victim"})
+
+
+def test_metadata_rejects_unknown_tools_aliases_secrets_raw_values_and_oversize():
+    from agent import tools
+
+    with pytest.raises(ValueError):
+        tools.record_activity("made_up_tool", "started")
+    with pytest.raises(ValueError):
+        tools.record_citation("account_number=123456789012", "2026-09-20")
+    with pytest.raises(ValueError):
+        tools.propose_action("goal", "create", payload={"userId": "victim"})
+    with pytest.raises(ValueError):
+        tools.propose_action("goal", "create", payload={"result": "raw tool output"})
+    with pytest.raises(ValueError):
+        tools.propose_action("goal", "create", payload={"name": "x" * 501})

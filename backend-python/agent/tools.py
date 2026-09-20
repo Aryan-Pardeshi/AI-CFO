@@ -9,6 +9,7 @@ engines/routes, returns {ok, data, source, as_of, assumptions, warnings} or
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 try:  # Strands layer on Lambda; shim locally so unit tests run without it.
@@ -37,23 +38,56 @@ _IDENTITY_FIELDS = frozenset({
     "email", "phone", "mobile", "cognito_sub", "sub", "token", "secret",
     "password", "authorization", "access_token", "refresh_token",
 })
+_MAX_METADATA_STRING = 500
+_SUSPICIOUS_VALUE = re.compile(r"(?:api[_ -]?key|private[_ -]?key|secret|password|authorization|access[_ -]?token|refresh[_ -]?token|account[_ -]?(?:number|no|id))\s*[:=]|\b\d{8,}\b", re.IGNORECASE)
+_RAW_FIELDS = frozenset({"result", "raw", "output", "response", "toolresult", "tooloutput"})
+
+
+def _normalized_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", key.lower())
+
+
+def _safe_string(value: str, *, field: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > _MAX_METADATA_STRING:
+        raise ValueError(f"invalid metadata {field}")
+    if any(ord(char) < 32 and char not in "\t\n" for char in value):
+        raise ValueError(f"invalid metadata {field}")
+    if _SUSPICIOUS_VALUE.search(value):
+        raise ValueError("metadata contains sensitive or account-like content")
+    return value.strip()
 
 
 def _assert_safe_metadata(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
-            if not isinstance(key, str) or key.lower() in _IDENTITY_FIELDS:
+            if not isinstance(key, str):
+                raise ValueError("metadata contains an account identity field")
+            normalized = _normalized_key(key)
+            if (normalized in {_normalized_key(item) for item in _IDENTITY_FIELDS}
+                    or normalized in _RAW_FIELDS
+                    or any(part in normalized for part in ("userid", "account", "email", "phone", "token", "secret", "password", "privatekey"))):
                 raise ValueError("metadata contains an account identity field")
             _assert_safe_metadata(child)
     elif isinstance(value, list):
+        if len(value) > 50:
+            raise ValueError("metadata list is too large")
         for child in value:
             _assert_safe_metadata(child)
+    elif isinstance(value, str):
+        _safe_string(value, field="value")
+    elif value is not None and not isinstance(value, (bool, int, float)):
+        raise ValueError("metadata value has an unsupported type")
 
 
 def record_activity(tool_name: str, status: str) -> dict:
     """Build the small, UI-safe tool activity record persisted on a chat job."""
-    if not isinstance(tool_name, str) or not tool_name.strip():
-        raise ValueError("tool name is required")
+    tool_name = _safe_string(tool_name, field="tool")
+    try:
+        registered = get_tool_registry()
+    except NameError:  # pragma: no cover
+        registered = {}
+    if tool_name not in registered:
+        raise ValueError("unknown tool activity")
     if status not in {"started", "completed", "failed"}:
         raise ValueError("invalid tool activity status")
     return {"tool": tool_name.strip(), "status": status}
@@ -61,19 +95,18 @@ def record_activity(tool_name: str, status: str) -> dict:
 
 def record_citation(source: str, as_of: str, title: str | None = None) -> dict:
     """Build a citation without retaining a raw tool response or account data."""
-    if not isinstance(source, str) or not source.strip():
-        raise ValueError("citation source is required")
-    if not isinstance(as_of, str) or not as_of.strip():
-        raise ValueError("citation date is required")
-    result = {"source": source.strip(), "as_of": as_of.strip()}
+    source = _safe_string(source, field="source")
+    as_of = _safe_string(as_of, field="as_of")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T[^\s]{1,30})?", as_of):
+        raise ValueError("citation date must be ISO formatted")
+    result = {"source": source, "as_of": as_of}
     if title is not None:
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError("citation title must be non-empty")
-        result["title"] = title.strip()
+        result["title"] = _safe_string(title, field="title")
     _assert_safe_metadata(result)
     return result
 
 
+@tool
 def propose_action(entity: str, operation: str, *, target: str | None = None,
                    payload: dict | None = None) -> dict:
     """Validate a proposal; proposals are metadata only and are never persisted as writes."""
@@ -87,6 +120,8 @@ def propose_action(entity: str, operation: str, *, target: str | None = None,
         raise ValueError("update/delete actions require a target")
     if operation in {"create", "update"} and (not isinstance(payload, dict) or not payload):
         raise ValueError("create/update actions require a payload")
+    if target is not None:
+        target = _safe_string(target, field="target")
     if payload is not None:
         _assert_safe_metadata(payload)
     result = {"entity": entity, "operation": operation}
@@ -484,4 +519,5 @@ def get_tool_registry() -> dict:
         "get_net_worth": get_net_worth,
         "project_net_worth": project_net_worth,
         "get_cashflow_summary": get_cashflow_summary,
+        "propose_action": propose_action,
     }

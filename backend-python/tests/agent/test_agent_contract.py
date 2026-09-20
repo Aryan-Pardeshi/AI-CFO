@@ -18,6 +18,7 @@ ALLOWED_TOOLS = {
     "get_net_worth",
     "project_net_worth",
     "get_cashflow_summary",
+    "propose_action",
 }
 
 UNSHIPPED = [
@@ -83,6 +84,9 @@ def test_system_prompt_safety_boundary():
     assert "trade" in text
     # must never promise concealment; must disclose failure
     assert "fail" in text
+    assert "untrusted_web" in text
+    assert "search quer" in text
+    assert "statement" in text
 
 
 def test_only_shipped_tools_registered():

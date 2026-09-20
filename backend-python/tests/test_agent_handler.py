@@ -25,3 +25,18 @@ def test_get_chat_job_returns_safe_metadata_fields(monkeypatch):
     assert body["citations"][0]["source"] == "holdings"
     assert body["proposed_actions"][0]["operation"] == "create"
     assert "user_id" not in json.dumps(body)
+
+
+def test_get_chat_job_fails_closed_on_malformed_stored_metadata(monkeypatch):
+    import handlers.agent as handler
+
+    class Table:
+        def get_item(self, Key):
+            return {"Item": {"user_id": "user-a", "job_id": Key["job_id"],
+                              "conversation_id": "c1", "status": "COMPLETED",
+                              "tool_activity": [{"tool": "made_up_tool", "status": "started"}]}}
+
+    monkeypatch.setattr(handler, "_chat_jobs_table", lambda: Table())
+    result = handler.get_chat_job_route("user-a", "job-1")
+    assert result["statusCode"] == 500
+    assert "tool_activity" not in json.loads(result["body"])

@@ -349,6 +349,17 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
                                 metadata["citations"].append(item)
                         except ValueError:
                             pass
+                tool_result = event.get("tool_result")
+                if isinstance(tool_result, dict):
+                    try:
+                        source = tool_result.get("source")
+                        as_of = tool_result.get("as_of")
+                        if source and as_of:
+                            item = tools_mod.record_citation(source, as_of)
+                            if item not in metadata["citations"]:
+                                metadata["citations"].append(item)
+                    except ValueError:
+                        pass
                 action = event.get("proposed_action")
                 if isinstance(action, dict):
                     try:

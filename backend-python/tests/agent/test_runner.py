@@ -127,6 +127,31 @@ def test_tool_activity_is_persisted_during_running_progress():
     assert jobs.items[("user-a", "job-1")].get("tool_activity")
 
 
+def test_real_tool_result_is_saved_as_citation_and_model_proposal_is_saved():
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    class AgentWithMetadata:
+        def stream_async(self, *_args, **_kwargs):
+            async def stream():
+                yield {"current_tool_use": {"toolUseId": "t1", "name": "get_net_worth"}}
+                yield {"tool_result": {"source": "holdings", "as_of": "2026-09-20"}}
+                yield {"proposed_action": {"entity": "goal", "operation": "create",
+                                              "payload": {"name": "car"}}}
+                yield {"data": "I can prepare that proposal for your review."}
+            return stream()
+
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
+                                       "status": "QUEUED", "conversation_id": "c1"}
+    job = runner_mod.run_chat_job(
+        _payload(), deps={"jobs_table": jobs, "conv_table": conv, "agent": AgentWithMetadata(),
+                          "tracker": tools_mod.ToolCallTracker(), "publisher": lambda *a, **k: True},
+    )
+    assert job["citations"] == [{"source": "holdings", "as_of": "2026-09-20"}]
+    assert job["proposed_actions"][0]["entity"] == "goal"
+
+
 def test_run_history_capped_at_10():
     from agent import runner as runner_mod
     from agent import tools as tools_mod
