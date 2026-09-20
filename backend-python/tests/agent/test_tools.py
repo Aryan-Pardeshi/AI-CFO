@@ -206,3 +206,17 @@ def test_engine_warnings_are_promoted_to_result_envelope():
     context = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker()})
     result = tools.analyze_short_term_fit([100, 101], 12, tool_context=context)
     assert result["warnings"]
+
+
+def test_market_and_research_tools_register_only_when_backing_credentials_exist(monkeypatch):
+    from agent import tools
+    monkeypatch.delenv("UPSTOX_ANALYTICS_TOKEN", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    names = set(tools.get_tool_registry(include_external=True))
+    assert "search_securities" not in names
+    assert "web_search" not in names
+    monkeypatch.setenv("UPSTOX_ANALYTICS_TOKEN", "configured")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "configured")
+    names = set(tools.get_tool_registry(include_external=True))
+    assert {"search_securities", "get_security_overview", "get_security_risk_metrics",
+            "analyze_portfolio_fit", "get_security_news", "web_search", "read_web_page"} <= names

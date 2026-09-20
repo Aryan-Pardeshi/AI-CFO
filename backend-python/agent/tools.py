@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import math
+import os
 import re
 from typing import Any
 
@@ -745,6 +746,72 @@ def analyze_short_term_fit(price_history: list, horizon_months: int, tool_contex
     return _run_finance("analyze_short_term_fit", fn, {"price_history": price_history, "horizon_months": horizon_months}, tool_context)
 
 
+def _market_client(tool_context):
+    client = getattr(tool_context, "invocation_state", {}).get("upstox_client") if tool_context else None
+    if client is None:
+        from integrations.upstox import UpstoxClient
+        client = UpstoxClient()
+    return client
+
+
+@tool(context=True)
+def search_securities(query: str, asset_type: str = "", limit: int = 10, tool_context=None) -> dict:
+    _calculator_context(tool_context, "search_securities")
+    client = _market_client(tool_context)
+    return client.search(query, asset_type=asset_type or None, limit=min(int(limit), 10))
+
+
+@tool(context=True)
+def get_security_overview(instrument_key: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_security_overview")
+    return _market_client(tool_context).overview(instrument_key)
+
+
+@tool(context=True)
+def get_security_risk_metrics(instrument_key: str, period: str = "1y", tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_security_risk_metrics")
+    return _market_client(tool_context).risk_metrics(instrument_key, period)
+
+
+@tool(context=True)
+def analyze_portfolio_fit(instrument_key: str, add_amount_inr: float = 0, tool_context=None) -> dict:
+    _calculator_context(tool_context, "analyze_portfolio_fit")
+    client = _market_client(tool_context)
+    return client.portfolio_fit(instrument_key, float(add_amount_inr))
+
+
+@tool(context=True)
+def get_security_news(instrument_key: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_security_news")
+    return _market_client(tool_context).news(instrument_key)
+
+
+def _research_client(tool_context):
+    client = getattr(tool_context, "invocation_state", {}).get("firecrawl_client") if tool_context else None
+    if client is None:
+        from integrations.firecrawl import FirecrawlClient
+        client = FirecrawlClient(http=_requests_client(), api_key=os.environ.get("FIRECRAWL_API_KEY"))
+    return client
+
+
+def _requests_client():
+    import requests
+    return requests
+
+
+@tool(context=True)
+def web_search(query: str, source: str = "web", recency: str = "", country: str = "IN", tool_context=None) -> dict:
+    _calculator_context(tool_context, "web_search")
+    return _research_client(tool_context).search(query, source=source, recency=recency or None, country=country)
+
+
+@tool(context=True)
+def read_web_page(result_id_or_url: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "read_web_page")
+    state = getattr(tool_context, "invocation_state", {})
+    return _research_client(tool_context).read(result_id_or_url, user_urls=state.get("user_urls", ()))
+
+
 from agent.action_proposals import (
     propose_dashboard_preferences as _propose_dashboard_preferences,
     propose_fire_scenario as _propose_fire_scenario,
@@ -797,8 +864,8 @@ def propose_transaction_category_change(target: str, category: str, tool_context
     return _propose_transaction_category_change(target, category, tool_context=tool_context)
 
 
-def get_tool_registry() -> dict:
-    return {
+def get_tool_registry(include_external: bool = False) -> dict:
+    registry = {
         "get_financial_snapshot": get_financial_snapshot,
         "get_portfolio_analysis": get_portfolio_analysis,
         "get_goals": get_goals,
@@ -829,3 +896,16 @@ def get_tool_registry() -> dict:
         "propose_transaction_category_change": propose_transaction_category_change,
         "propose_action": propose_action,
     }
+    # Adapters are injected by the authenticated runner only when credentials/backing
+    # services are live. Never expose a model tool that can only return a stub.
+    if include_external and os.environ.get("UPSTOX_ANALYTICS_TOKEN"):
+        registry.update({
+            "search_securities": search_securities,
+            "get_security_overview": get_security_overview,
+            "get_security_risk_metrics": get_security_risk_metrics,
+            "analyze_portfolio_fit": analyze_portfolio_fit,
+            "get_security_news": get_security_news,
+        })
+    if include_external and os.environ.get("FIRECRAWL_API_KEY"):
+        registry.update({"web_search": web_search, "read_web_page": read_web_page})
+    return registry

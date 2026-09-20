@@ -5,3 +5,4 @@ numpy>=1.26  # finance ratio math (returns, volatility, covariance) — floats o
 pandas>=2.0  # finance time-series helpers (pct_change-style series, date alignment)
 # Strands + Bedrock come from the official Lambda layer (template.yaml), not pip.
 openai>=1.0  # strands.models.openai.OpenAIModel client — Kilo Gateway. See agent-guide.md#kilo-ai-gateway.
+requests>=2.31  # injected HTTP transport for Upstox/mfapi/Firecrawl adapters
