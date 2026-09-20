@@ -501,13 +501,14 @@ Resources:
       Environment:
         Variables:
           DATA_BUCKET: !Ref DataBucket
-          # Bedrock parked (account on Free plan blocks inference) — Kilo Gateway is the
-          # live chat model path. See agent-guide.md#kilo-ai-gateway.
+          # Bedrock is parked while the account is on the Free plan. OpenRouter is the
+          # live, OpenAI-compatible chat gateway; its key stays in Secrets Manager.
           BEDROCK_MODEL_ID: global.amazon.nova-2-lite-v1:0
-          KILO_BASE_URL: https://api.kilo.ai/api/gateway
-          KILO_MODEL_ID: deepseek/deepseek-v4-flash-0731:free
-          KILO_FALLBACK_MODEL_ID: nvidia/nemotron-3-super-120b-a12b:free
-          KILO_SECOND_FALLBACK_MODEL_ID: kilo-auto/free
+          KILO_BASE_URL: https://openrouter.ai/api/v1
+          KILO_MODEL_ID: z-ai/glm-5.3-flash
+          KILO_FALLBACK_MODEL_ID: ""
+          KILO_SECOND_FALLBACK_MODEL_ID: ""
+          KILO_SECRET_ID: aicfo/openrouter
           EVENTS_HTTP_ENDPOINT: !GetAtt EventsApi.Dns.Http
           USERS_TABLE: !Ref UsersTable
           HOLDINGS_TABLE: !Ref HoldingsTable
@@ -586,7 +587,7 @@ Resources:
               Resource:
                 - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/upstox-*
                 - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/firecrawl-*
-                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/kilo-*
+                - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:aicfo/openrouter-*
         - Statement:
             - Sid: AllowAppSyncEventPublish
               Effect: Allow

@@ -35,15 +35,15 @@ UNSHIPPED = [
 ]
 
 
-def test_kilo_factory_uses_pinned_gateway_config(monkeypatch):
+def test_gateway_factory_uses_openrouter_glm_config(monkeypatch):
     monkeypatch.delenv("KILO_MODEL_ID", raising=False)
     monkeypatch.delenv("KILO_BASE_URL", raising=False)
     from agent import model as model_mod
-    assert model_mod.KILO_BASE_URL_DEFAULT == "https://api.kilo.ai/api/gateway"
-    assert model_mod.KILO_MODEL_ID_DEFAULT == "deepseek/deepseek-v4-flash-0731:free"
-    assert model_mod.KILO_FALLBACK_MODEL_ID_DEFAULT == "nvidia/nemotron-3-super-120b-a12b:free"
-    assert getattr(model_mod, "KILO_SECOND_FALLBACK_MODEL_ID_DEFAULT", "") == "kilo-auto/free"
-    assert model_mod.KILO_SECRET_ID_DEFAULT == "aicfo/kilo"
+    assert model_mod.KILO_BASE_URL_DEFAULT == "https://openrouter.ai/api/v1"
+    assert model_mod.KILO_MODEL_ID_DEFAULT == "z-ai/glm-5.3-flash"
+    assert model_mod.KILO_FALLBACK_MODEL_ID_DEFAULT == ""
+    assert getattr(model_mod, "KILO_SECOND_FALLBACK_MODEL_ID_DEFAULT", "") == ""
+    assert model_mod.KILO_SECRET_ID_DEFAULT == "aicfo/openrouter"
     seen = {}
 
     class FakeOpenAIModel:
@@ -52,10 +52,10 @@ def test_kilo_factory_uses_pinned_gateway_config(monkeypatch):
 
     created = model_mod.create_kilo_model(model_cls=FakeOpenAIModel, api_key="test-key")
     assert created is not None
-    assert seen["model_id"] == "deepseek/deepseek-v4-flash-0731:free"
+    assert seen["model_id"] == "z-ai/glm-5.3-flash"
     assert seen["client_args"] == {
         "api_key": "test-key",
-        "base_url": "https://api.kilo.ai/api/gateway",
+        "base_url": "https://openrouter.ai/api/v1",
     }
     assert seen["params"] == {"temperature": pytest.approx(0.2), "max_tokens": 2000}
 
@@ -204,7 +204,7 @@ def test_store_uses_env_table_names_and_query_only(monkeypatch):
     assert "user_conv" in src
 
 
-def test_kilo_references_in_runtime_and_config():
+def test_openrouter_glm_references_in_runtime_and_config():
     repo = os.path.join(os.path.dirname(__file__), "..", "..", "..")
     for rel in ["backend-python/requirements.txt", "infra/template.yaml", "backend-python/agent/model.py"]:
         with open(os.path.join(repo, rel)) as f:
@@ -219,11 +219,11 @@ def test_kilo_references_in_runtime_and_config():
     assert "secretsmanager" in model
     with open(os.path.join(repo, "infra/template.yaml")) as f:
         tpl = f.read()
-    assert "KILO_BASE_URL: https://api.kilo.ai/api/gateway" in tpl
-    assert "KILO_MODEL_ID: deepseek/deepseek-v4-flash-0731:free" in tpl
-    assert "KILO_FALLBACK_MODEL_ID: nvidia/nemotron-3-super-120b-a12b:free" in tpl
-    assert "KILO_SECOND_FALLBACK_MODEL_ID: kilo-auto/free" in tpl
-    assert "aicfo/kilo-*" in tpl
+    assert "KILO_BASE_URL: https://openrouter.ai/api/v1" in tpl
+    assert "KILO_MODEL_ID: z-ai/glm-5.3-flash" in tpl
+    assert 'KILO_FALLBACK_MODEL_ID: ""' in tpl
+    assert 'KILO_SECOND_FALLBACK_MODEL_ID: ""' in tpl
+    assert "aicfo/openrouter-*" in tpl
     assert "AllowNemotronNanoModelInvoke" not in tpl
     assert "global.amazon.nova-2-lite-v1:0" in tpl
     assert tpl.count("bedrock:InvokeModel") >= 2

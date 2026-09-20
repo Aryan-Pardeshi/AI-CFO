@@ -11,11 +11,11 @@ import json
 import os
 from typing import Callable
 
-KILO_BASE_URL_DEFAULT = "https://api.kilo.ai/api/gateway"
-KILO_MODEL_ID_DEFAULT = "deepseek/deepseek-v4-flash-0731:free"
-KILO_FALLBACK_MODEL_ID_DEFAULT = "nvidia/nemotron-3-super-120b-a12b:free"
-KILO_SECOND_FALLBACK_MODEL_ID_DEFAULT = "kilo-auto/free"
-KILO_SECRET_ID_DEFAULT = "aicfo/kilo"
+KILO_BASE_URL_DEFAULT = "https://openrouter.ai/api/v1"
+KILO_MODEL_ID_DEFAULT = "z-ai/glm-5.3-flash"
+KILO_FALLBACK_MODEL_ID_DEFAULT = ""
+KILO_SECOND_FALLBACK_MODEL_ID_DEFAULT = ""
+KILO_SECRET_ID_DEFAULT = "aicfo/openrouter"
 KILO_TEMPERATURE = 0.2
 KILO_MAX_TOKENS = 2000
 
