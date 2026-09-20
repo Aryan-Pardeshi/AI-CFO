@@ -47,7 +47,6 @@ const DashboardLayout = () => {
         {/* Desktop Navigation Links */}
         <nav className="desktop-nav">
           <NavLink to="/overview" style={navLinkStyle}>Overview</NavLink>
-          <NavLink to="/investments" style={navLinkStyle}>Investments</NavLink>
           <NavLink to="/ai-advisory" style={navLinkStyle}>ARIA Advisory</NavLink>
           <NavLink to="/monthly-tracker" style={navLinkStyle}>Monthly Tracker</NavLink>
           <NavLink to="/milestones" style={navLinkStyle}>Milestones</NavLink>
@@ -105,9 +104,6 @@ const DashboardLayout = () => {
         <div className="mobile-drawer" role="navigation" aria-label="Mobile Navigation">
           <NavLink to="/overview" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
             Overview
-          </NavLink>
-          <NavLink to="/investments" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
-            Investments
           </NavLink>
           <NavLink to="/ai-advisory" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
             ARIA Advisory

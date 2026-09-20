@@ -57,8 +57,10 @@ GitHub OAuth connection is available.
 - FIRE page at `/fire`, dashboard FIRE card/button, baseline forecast, current runway, goal-impact scenario, and
   scenario creation with explicit validation.
 - Net-worth view and projection.
-- Investments/Balance Sheet view with holdings, allocation, P&L, history, and concentration warning.
-- Security explorer and security detail pages for search, overview, history/risk, news, and portfolio-fit context.
+- Balance Sheet view with holdings, allocation, P&L, history, and concentration warning.
+- Security detail page (`/securities/:instrumentKey`) for overview, history/risk, news, and portfolio-fit context.
+  The Investments page (security search + list) was removed on 20 Sept, so this page currently has no in-app link and
+  is reachable by URL only.
 - News page with market tiles, provider/source metadata, dated headlines, and hedged personalized ideas.
 - Goals, loans, milestones, monthly tracker, and transaction-category review flows.
 - Demo user seeded with profile, seven holdings, two goals, four loans, and 58 transactions over six months.
@@ -196,7 +198,7 @@ backend-python/agent/                   Kilo runner, tool registry, safety, pers
 backend-python/integrations/            Upstox, mfapi.in, Firecrawl adapters
 frontend/src/App.jsx                    landing/auth/onboarding/dashboard routes
 frontend/src/pages/onboarding/          onboarding and CSV review flow
-frontend/src/pages/dashboard/            overview/FIRE/ARIA/news/investments/security pages
+frontend/src/pages/dashboard/            overview/FIRE/ARIA/news/security pages
 frontend/src/lib/                       authenticated APIs, chat, FIRE, dashboard and action helpers
 seed/                                   demo portfolio, fundamentals, statement fixtures
 docs/                                   submission and handover material
@@ -206,7 +208,7 @@ Frontend routes:
 
 `/`, `/register`, `/confirm`, `/login`, `/onboarding`, `/onboarding/method`, `/onboarding/manual`,
 `/onboarding/csv`, `/overview`, `/fire`, `/ai-advisory`, `/monthly-tracker`, `/milestones`, `/balance-sheet`,
-`/news`, `/investments`, `/securities/:instrumentKey`, and `/dashboard` (redirects to `/overview`).
+`/news`, `/securities/:instrumentKey`, and `/dashboard` and `/investments` (both redirect to `/overview`).
 
 ## 7. Verification record
 

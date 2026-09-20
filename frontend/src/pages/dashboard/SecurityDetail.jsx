@@ -81,7 +81,7 @@ export default function SecurityDetail() {
     return (
       <div style={{ padding: '2rem 1rem', maxWidth: '1200px', margin: '0 auto' }}>
         <button
-          onClick={() => navigate('/investments')}
+          onClick={() => navigate('/overview')}
           style={{
             background: 'none',
             border: 'none',
@@ -95,7 +95,7 @@ export default function SecurityDetail() {
             marginBottom: '1.5rem',
           }}
         >
-          ← Back to Investments
+          ← Back to Overview
         </button>
         <div
           style={{
@@ -118,7 +118,7 @@ export default function SecurityDetail() {
     return (
       <div style={{ padding: '2rem 1rem', maxWidth: '1200px', margin: '0 auto' }}>
         <button
-          onClick={() => navigate('/investments')}
+          onClick={() => navigate('/overview')}
           style={{
             background: 'none',
             border: 'none',
@@ -132,7 +132,7 @@ export default function SecurityDetail() {
             marginBottom: '1.5rem',
           }}
         >
-          ← Back to Investments
+          ← Back to Overview
         </button>
         <div
           style={{
@@ -149,7 +149,7 @@ export default function SecurityDetail() {
             {error || 'The requested security was not found.'}
           </p>
           <button
-            onClick={() => navigate('/investments')}
+            onClick={() => navigate('/overview')}
             style={{
               padding: '0.6rem 1.25rem',
               borderRadius: '8px',
@@ -160,7 +160,7 @@ export default function SecurityDetail() {
               cursor: 'pointer',
             }}
           >
-            Return to Investments
+            Return to Overview
           </button>
         </div>
       </div>
@@ -199,7 +199,7 @@ export default function SecurityDetail() {
       {/* Back button */}
       <div>
         <button
-          onClick={() => navigate('/investments')}
+          onClick={() => navigate('/overview')}
           style={{
             background: 'none',
             border: 'none',
@@ -212,9 +212,9 @@ export default function SecurityDetail() {
             padding: '0.4rem 0',
             transition: 'color 0.15s ease',
           }}
-          aria-label="Back to Investments"
+          aria-label="Back to Overview"
         >
-          ← Back to Investments
+          ← Back to Overview
         </button>
       </div>
 
