@@ -103,13 +103,15 @@ def _latest_turn_instruction(message: str) -> str:
     """Keep a fresh request from being eclipsed by a persisted assistant turn."""
 
     normalized = message.lower()
+    # "Update me ..." asks for status, including "on", "about", and "regarding".
+    edit_verb = r"(?:update(?!\s+me\b)|change|edit|set|create|save|delete|remove)\b"
     edit_request = re.match(
-        r"^(?:please\s+)?(?:update|change|edit|set|create|save|delete|remove)\b",
+        r"^(?:please\s+)?" + edit_verb,
         normalized.strip(),
     )
     conversational_edit = re.match(
         r"^(?:can you|could you|would you|i want to|i'd like to)\s+(?:please\s+)?"
-        r"(?:update|change|edit|set|create|save|delete|remove)\b",
+        + edit_verb,
         normalized.strip(),
     )
     if (edit_request and not normalized.rstrip().endswith("?")) or conversational_edit:

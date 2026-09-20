@@ -313,10 +313,26 @@ def test_imperative_edit_still_routes_to_proposal():
     assert "propose_*" in latest
 
 
+@pytest.mark.parametrize(("message", "read_tool"), [
+    ("Can you update me on my portfolio?", "get_portfolio_analysis"),
+    ("Could you update me on what changed in my spending?", "get_cashflow_summary"),
+    ("Would you update me about my cash flow?", "get_cashflow_summary"),
+    ("Can you please update me with the latest on my portfolio?", "get_portfolio_analysis"),
+    ("Please update me on my portfolio", "get_portfolio_analysis"),
+    ("Could you update me regarding my portfolio?", "get_portfolio_analysis"),
+])
+def test_update_me_status_request_routes_to_read(message, read_tool):
+    from agent import runner as runner_mod
+
+    latest = runner_mod._strands_messages([], message)[-1]["content"][0]["text"]
+    assert "propose_*" not in latest
+    assert read_tool in latest
+
+
 def test_conversational_edit_request_routes_to_proposal():
     from agent import runner as runner_mod
 
-    latest = runner_mod._strands_messages([], "Can you update my loan balance to 400000?")[-1]["content"][0]["text"]
+    latest = runner_mod._strands_messages([], "Can you update my loan balance to 500000?")[-1]["content"][0]["text"]
     assert "propose_*" in latest
 
 

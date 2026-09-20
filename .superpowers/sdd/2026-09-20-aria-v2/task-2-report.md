@@ -67,3 +67,15 @@ passive/historical change wording remains a read query.
 
 Focused runner tests: `20 passed`.
 Full backend suite: `200 passed`.
+
+## Fix round 4 TDD evidence
+
+Added six status-request regressions covering conversational and imperative `update me`
+phrasing with `on`, `about`, `with the latest`, and `regarding`. RED reproduced the
+incorrect proposal route; each final regression was observed failing before the fix.
+The shared edit-verb matcher now excludes `update me`, allowing the existing portfolio
+and cashflow read routes to apply. The explicit edit regression verifies that
+`Can you update my loan balance to 500000?` still selects a proposal.
+
+Focused runner tests: `26 passed`.
+Full backend suite: `206 passed` (`PYTHONPATH=backend-python python -m pytest -q backend-python/tests`).
