@@ -1,6 +1,7 @@
 """Firecrawl request/content safety. Web text is always untrusted model input."""
 import re
 import secrets
+from urllib.parse import urlsplit, urlunsplit
 
 _INJECTION = re.compile(r"(?:ignore\s+(?:all|previous)|system\s*[:：]|assistant\s*[:：]|tool[_ ]?call|function\s*call|reveal\s+(?:the\s+)?system|do\s+not\s+tell)", re.I)
 _PRIVATE = re.compile(r"(?:net\s*worth|income|salary|account|portfolio\s+value|bank\s+balance|\b\d{8,}\b|₹\s*[\d,]+)", re.I)
@@ -23,8 +24,33 @@ def clean_web_content(text, max_chars=12000):
 
 
 def spotlight(text, url):
+    url = normalize_url(url)
     nonce = secrets.token_hex(8)
     return f"<<untrusted_web_{nonce} url={url}>\n{text}\n<</untrusted_web_{nonce}>>"
+
+
+def normalize_url(value):
+    if not isinstance(value, str) or not value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("Invalid URL")
+    try:
+        parts = urlsplit(value)
+        if parts.scheme.casefold() not in {"http", "https"} or not parts.netloc:
+            raise ValueError("Invalid URL")
+        if parts.username or parts.password or not parts.hostname:
+            raise ValueError("Invalid URL")
+        port = parts.port
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("Invalid URL")
+        host = parts.hostname.casefold()
+        netloc = host
+        if port is not None:
+            netloc += f":{port}"
+        normalized = urlunsplit((parts.scheme.casefold(), netloc, parts.path or "/", parts.query, parts.fragment))
+        if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+            raise ValueError("Invalid URL")
+        return normalized
+    except (TypeError, ValueError):
+        raise ValueError("Invalid URL")
 
 
 class ResearchGuard:
@@ -47,17 +73,23 @@ class ResearchGuard:
         self.searches += 1
 
     def record_search_result(self, result_id, url):
-        if not result_id or not isinstance(url, str) or not url.startswith(("https://", "http://")):
+        if not result_id:
             raise ValueError("Invalid Firecrawl result")
-        self.results[str(result_id)] = url
+        self.results[str(result_id)] = normalize_url(url)
 
     def validate_read(self, result_id_or_url, user_urls=()):
         if self.reads >= self.max_reads:
             raise RuntimeError("Firecrawl read limit reached")
         value = str(result_id_or_url)
         allowed = self.results.get(value)
-        if not allowed and value in set(user_urls):
-            allowed = value
+        if not allowed:
+            normalized_user_urls = {normalize_url(item) for item in user_urls}
+            try:
+                normalized_value = normalize_url(value)
+            except ValueError:
+                normalized_value = None
+            if normalized_value in normalized_user_urls:
+                allowed = normalized_value
         if not allowed:
             raise ValueError("Page must be a user URL or this job's search result")
         self.reads += 1

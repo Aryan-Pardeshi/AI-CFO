@@ -59,3 +59,20 @@ def test_daily_cache_avoids_second_quote_request():
     client.quote("NSE_EQ|INE", as_of="2026-09-20")
     client.quote("NSE_EQ|INE", as_of="2026-09-20")
     assert len(http.calls) == 1
+
+
+def test_risk_requests_and_uses_requested_period_only():
+    candles = [["2020-01-01T00:00:00Z", 1, 1, 1, 1, 1, 0],
+               ["2025-01-01T00:00:00Z", 1, 1, 1, 2, 1, 0],
+               ["2026-01-01T00:00:00Z", 2, 2, 2, 4, 1, 0],
+               ["2026-09-19T00:00:00Z", 4, 4, 4, 8, 1, 0]]
+    http = FakeHttp({"data": {"candles": candles}})
+    result = UpstoxClient(http=http, token="token").risk_metrics("NSE_EQ|INE", "1y")
+    url, _ = http.calls[0]
+    assert url.endswith("/2025-09-20")
+    assert result["data"]["observations"] == 1
+
+
+def test_search_reports_unavailable_without_verified_catalog():
+    with pytest.raises(MarketDataError, match="catalog"):
+        UpstoxClient(http=FakeHttp({}), token="token").search("nifty")

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import json
 import os
 
-from agent.research_safety import ResearchGuard, clean_web_content, spotlight
+from agent.research_safety import ResearchGuard, clean_web_content, normalize_url, spotlight
 
 
 class FirecrawlError(RuntimeError):
@@ -53,11 +53,14 @@ class FirecrawlClient:
             if not isinstance(row, dict) or not row.get("url"):
                 continue
             result_id = str(row.get("id") or f"search-{index}")
-            self.guard.record_search_result(result_id, row["url"])
-            out.append({"result_id": result_id, "title": row.get("title", ""), "url": row["url"],
+            url = normalize_url(row["url"])
+            self.guard.record_search_result(result_id, url)
+            out.append({"result_id": result_id, "title": row.get("title", ""), "url": url,
                         "snippet": row.get("description") or row.get("snippet", "")})
         as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        return {"source": "Firecrawl", "as_of": as_of, "warnings": [], "data": out}
+        citations = [{"id": row["result_id"], "source": "Firecrawl", "as_of": as_of,
+                      "title": row["title"], "url": row["url"]} for row in out]
+        return {"source": "Firecrawl", "as_of": as_of, "warnings": [], "citations": citations, "data": out}
 
     def read(self, result_id_or_url, user_urls=()):
         url = self.guard.validate_read(result_id_or_url, user_urls)
@@ -67,7 +70,9 @@ class FirecrawlClient:
         raw = data.get("markdown") if isinstance(data, dict) else ""
         cleaned, warnings = clean_web_content(raw)
         as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        return {"source": "Firecrawl", "as_of": as_of, "warnings": warnings,
+        citation_id = result_id_or_url if result_id_or_url in self.guard.results else "user-url"
+        citation = {"id": str(citation_id), "source": "Firecrawl", "as_of": as_of, "url": url}
+        return {"source": "Firecrawl", "as_of": as_of, "warnings": warnings, "citations": [citation],
                 "data": {"url": url, "content": spotlight(cleaned, url)}}
 
 

@@ -220,3 +220,43 @@ def test_market_and_research_tools_register_only_when_backing_credentials_exist(
     names = set(tools.get_tool_registry(include_external=True))
     assert {"search_securities", "get_security_overview", "get_security_risk_metrics",
             "analyze_portfolio_fit", "get_security_news", "web_search", "read_web_page"} <= names
+
+
+def test_external_tool_failures_use_truthful_safe_envelopes():
+    from agent import tools
+    class BrokenMarket:
+        def search(self, *args, **kwargs): raise RuntimeError("secret transport detail")
+        def overview(self, *args, **kwargs): raise ValueError("bad instrument")
+    class BrokenResearch:
+        def search(self, *args, **kwargs): raise RuntimeError("secret transport detail")
+    class BrokenMf:
+        def search_schemes(self, *args, **kwargs): raise RuntimeError("secret transport detail")
+    ctx = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker(),
+                                             "upstox_client": BrokenMarket(),
+                                             "firecrawl_client": BrokenResearch(),
+                                             "mfapi_client": BrokenMf()})
+    for result in (
+        tools.search_securities("nifty", tool_context=ctx),
+        tools.get_security_overview("NSE_EQ|INE", tool_context=ctx),
+        tools.web_search("RBI inflation", tool_context=ctx),
+        tools.search_mutual_funds("index", tool_context=ctx),
+    ):
+        assert result["ok"] is False
+        assert result["error_code"] in {"UPSTREAM_UNAVAILABLE", "VALIDATION_ERROR"}
+        assert "secret" not in result["message"].lower()
+
+
+def test_mutual_fund_tools_register_and_preserve_source_as_of(monkeypatch):
+    from agent import tools
+    class Mf:
+        def search_schemes(self, query, limit=10):
+            return {"source": "mfapi.in", "as_of": "2026-09-20", "warnings": [],
+                    "data": [{"scheme_code": "1", "scheme_name": "Index"}]}
+        def latest_nav(self, code):
+            return {"source": "mfapi.in", "as_of": "2026-09-20", "warnings": [],
+                    "data": {"scheme_code": code, "nav_inr": 10.0}}
+    ctx = SimpleNamespace(invocation_state={"user_id": "u", "tracker": tools.ToolCallTracker(), "mfapi_client": Mf()})
+    assert tools.search_mutual_funds("index", tool_context=ctx)["source"] == "mfapi.in"
+    assert tools.get_mutual_fund_nav("1", tool_context=ctx)["as_of"] == "2026-09-20"
+    names = set(tools.get_tool_registry(include_external=True, external_clients={"mfapi": Mf()}))
+    assert {"search_mutual_funds", "get_mutual_fund_nav"} <= names

@@ -1,5 +1,5 @@
 """Read-only Upstox market adapter with injected transport and optional daily cache."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 import json
 
@@ -20,7 +20,7 @@ class UpstoxClient:
         self.token = token or os.environ.get("UPSTOX_ANALYTICS_TOKEN") or _secret_token("aicfo/upstox", "analytics_token")
         self.cache = cache
         self.base_url = (base_url or self.BASE_URL).rstrip("/")
-        self.instruments = instruments or []
+        self.instruments = instruments
         self.portfolio = portfolio or []
         if not self.token:
             raise MarketDataError("Upstox credentials are not configured")
@@ -91,6 +91,8 @@ class UpstoxClient:
         needle = " ".join(str(query or "").casefold().split())
         if len(needle) < 2:
             raise ValueError("query must contain at least two characters")
+        if not self.instruments:
+            raise MarketDataError("Upstox instrument catalog is unavailable")
         rows = []
         for item in self.instruments:
             name = str(item.get("name") or item.get("trading_symbol") or "")
@@ -106,8 +108,18 @@ class UpstoxClient:
     def risk_metrics(self, instrument_key, period="1y"):
         if period not in {"1y", "3y", "5y"}:
             raise ValueError("period must be 1y, 3y, or 5y")
-        history = self.history(instrument_key, "2000-01-01", datetime.now(timezone.utc).date().isoformat())
-        closes = [float(c["close_inr"]) for c in history["data"]["candles"] if c.get("close_inr") is not None]
+        today = datetime.now(timezone.utc).date()
+        years = int(period[:-1])
+        start_date = today - timedelta(days=365 * years)
+        history = self.history(instrument_key, start_date.isoformat(), today.isoformat())
+        candles = []
+        for candle in history["data"]["candles"]:
+            try:
+                if start_date <= datetime.fromisoformat(str(candle["timestamp"]).replace("Z", "+00:00")).date() <= today:
+                    candles.append(candle)
+            except (TypeError, ValueError):
+                continue
+        closes = [float(c["close_inr"]) for c in candles if c.get("close_inr") is not None]
         if len(closes) < 2:
             raise MarketDataError("Not enough history for risk metrics")
         returns = [(closes[i] / closes[i - 1]) - 1 for i in range(1, len(closes))]

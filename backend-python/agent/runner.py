@@ -46,7 +46,7 @@ def _default_agent_factory(*, model_id: str | None = None):
         # the Lambda layer, not a pip dependency). Any *other* failure, like a
         # bad tool schema or a missing secret, must propagate so the chat job
         # is marked FAILED instead of returning a plausible canned answer.
-        registry = tools_mod.get_tool_registry()
+        registry = tools_mod.get_tool_registry(include_external=True, discover=True)
 
         class _FallbackResult:
             def __init__(self, text, tools_used):
@@ -68,7 +68,7 @@ def _default_agent_factory(*, model_id: str | None = None):
         agent._tool_registry = registry
         return agent
 
-    tools = list(tools_mod.get_tool_registry().values())
+    tools = list(tools_mod.get_tool_registry(include_external=True, discover=True).values())
     return Agent(model=model, system_prompt=prompt_mod.SYSTEM_PROMPT, tools=tools)
 
 

@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 
 from integrations.mfapi import MfapiClient, MfapiError
 
@@ -46,3 +47,8 @@ def test_bad_scheme_or_upstream_failure_is_not_fabricated():
         MfapiClient(http=Http({})).latest_nav("")
     with pytest.raises(MfapiError):
         MfapiClient(http=Http({}, 500)).latest_nav("123")
+
+
+def test_search_as_of_uses_timezone_aware_today():
+    result = MfapiClient(http=Http({}), scheme_catalog=[]).search_schemes("index")
+    assert result["as_of"] == datetime.now(timezone.utc).date().isoformat()

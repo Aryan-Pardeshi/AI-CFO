@@ -1,5 +1,5 @@
 """mfapi.in mutual-fund scheme/NAV adapter."""
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class MfapiError(RuntimeError):
@@ -27,7 +27,7 @@ class MfapiClient:
             name = str(item.get("schemeName") or item.get("scheme_name") or "")
             if needle in " ".join(name.casefold().split()):
                 rows.append({"scheme_code": str(item.get("schemeCode") or item.get("scheme_code")), "scheme_name": name})
-        return {"source": "mfapi.in", "as_of": datetime.utcnow().date().isoformat(), "warnings": [], "data": rows[:max(1, min(int(limit), 10))]}
+        return {"source": "mfapi.in", "as_of": datetime.now(timezone.utc).date().isoformat(), "warnings": [], "data": rows[:max(1, min(int(limit), 10))]}
 
     def latest_nav(self, scheme_code):
         if not str(scheme_code).strip():

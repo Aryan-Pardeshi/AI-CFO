@@ -754,36 +754,67 @@ def _market_client(tool_context):
     return client
 
 
+def _external_call(call):
+    try:
+        result = call()
+        if not isinstance(result, dict):
+            return err_result("UPSTREAM_UNAVAILABLE", "External data is unavailable right now")
+        return result
+    except (ValueError, TypeError, OverflowError):
+        return err_result("VALIDATION_ERROR", "External-data inputs are invalid")
+    except Exception:
+        return err_result("UPSTREAM_UNAVAILABLE", "External data is unavailable right now")
+
+
 @tool(context=True)
 def search_securities(query: str, asset_type: str = "", limit: int = 10, tool_context=None) -> dict:
     _calculator_context(tool_context, "search_securities")
-    client = _market_client(tool_context)
-    return client.search(query, asset_type=asset_type or None, limit=min(int(limit), 10))
+    return _external_call(lambda: _market_client(tool_context).search(
+        query, asset_type=asset_type or None, limit=min(int(limit), 10)))
 
 
 @tool(context=True)
 def get_security_overview(instrument_key: str, tool_context=None) -> dict:
     _calculator_context(tool_context, "get_security_overview")
-    return _market_client(tool_context).overview(instrument_key)
+    return _external_call(lambda: _market_client(tool_context).overview(instrument_key))
 
 
 @tool(context=True)
 def get_security_risk_metrics(instrument_key: str, period: str = "1y", tool_context=None) -> dict:
     _calculator_context(tool_context, "get_security_risk_metrics")
-    return _market_client(tool_context).risk_metrics(instrument_key, period)
+    return _external_call(lambda: _market_client(tool_context).risk_metrics(instrument_key, period))
 
 
 @tool(context=True)
 def analyze_portfolio_fit(instrument_key: str, add_amount_inr: float = 0, tool_context=None) -> dict:
     _calculator_context(tool_context, "analyze_portfolio_fit")
-    client = _market_client(tool_context)
-    return client.portfolio_fit(instrument_key, float(add_amount_inr))
+    return _external_call(lambda: _market_client(tool_context).portfolio_fit(instrument_key, float(add_amount_inr)))
 
 
 @tool(context=True)
 def get_security_news(instrument_key: str, tool_context=None) -> dict:
     _calculator_context(tool_context, "get_security_news")
-    return _market_client(tool_context).news(instrument_key)
+    return _external_call(lambda: _market_client(tool_context).news(instrument_key))
+
+
+def _mf_client(tool_context):
+    client = getattr(tool_context, "invocation_state", {}).get("mfapi_client") if tool_context else None
+    if client is None:
+        from integrations.mfapi import MfapiClient
+        client = MfapiClient()
+    return client
+
+
+@tool(context=True)
+def search_mutual_funds(query: str, limit: int = 10, tool_context=None) -> dict:
+    _calculator_context(tool_context, "search_mutual_funds")
+    return _external_call(lambda: _mf_client(tool_context).search_schemes(query, limit=min(int(limit), 10)))
+
+
+@tool(context=True)
+def get_mutual_fund_nav(scheme_code: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_mutual_fund_nav")
+    return _external_call(lambda: _mf_client(tool_context).latest_nav(scheme_code))
 
 
 def _research_client(tool_context):
@@ -802,14 +833,16 @@ def _requests_client():
 @tool(context=True)
 def web_search(query: str, source: str = "web", recency: str = "", country: str = "IN", tool_context=None) -> dict:
     _calculator_context(tool_context, "web_search")
-    return _research_client(tool_context).search(query, source=source, recency=recency or None, country=country)
+    return _external_call(lambda: _research_client(tool_context).search(
+        query, source=source, recency=recency or None, country=country))
 
 
 @tool(context=True)
 def read_web_page(result_id_or_url: str, tool_context=None) -> dict:
     _calculator_context(tool_context, "read_web_page")
     state = getattr(tool_context, "invocation_state", {})
-    return _research_client(tool_context).read(result_id_or_url, user_urls=state.get("user_urls", ()))
+    return _external_call(lambda: _research_client(tool_context).read(
+        result_id_or_url, user_urls=state.get("user_urls", ())))
 
 
 from agent.action_proposals import (
@@ -864,7 +897,8 @@ def propose_transaction_category_change(target: str, category: str, tool_context
     return _propose_transaction_category_change(target, category, tool_context=tool_context)
 
 
-def get_tool_registry(include_external: bool = False) -> dict:
+def get_tool_registry(include_external: bool = False, external_clients: dict | None = None,
+                      discover: bool = False) -> dict:
     registry = {
         "get_financial_snapshot": get_financial_snapshot,
         "get_portfolio_analysis": get_portfolio_analysis,
@@ -898,7 +932,16 @@ def get_tool_registry(include_external: bool = False) -> dict:
     }
     # Adapters are injected by the authenticated runner only when credentials/backing
     # services are live. Never expose a model tool that can only return a stub.
-    if include_external and os.environ.get("UPSTOX_ANALYTICS_TOKEN"):
+    external_clients = external_clients or {}
+    upstox_ready = "upstox" in external_clients or os.environ.get("UPSTOX_ANALYTICS_TOKEN")
+    firecrawl_ready = "firecrawl" in external_clients or os.environ.get("FIRECRAWL_API_KEY")
+    if include_external and discover:
+        if not upstox_ready:
+            from integrations.upstox import _secret_token
+            upstox_ready = bool(_secret_token("aicfo/upstox", "analytics_token"))
+        if not firecrawl_ready:
+            firecrawl_ready = bool(__import__("integrations.firecrawl", fromlist=["_secret_token"])._secret_token())
+    if include_external and upstox_ready:
         registry.update({
             "search_securities": search_securities,
             "get_security_overview": get_security_overview,
@@ -906,6 +949,8 @@ def get_tool_registry(include_external: bool = False) -> dict:
             "analyze_portfolio_fit": analyze_portfolio_fit,
             "get_security_news": get_security_news,
         })
-    if include_external and os.environ.get("FIRECRAWL_API_KEY"):
+    if include_external and firecrawl_ready:
         registry.update({"web_search": web_search, "read_web_page": read_web_page})
+    if include_external:
+        registry.update({"search_mutual_funds": search_mutual_funds, "get_mutual_fund_nav": get_mutual_fund_nav})
     return registry
