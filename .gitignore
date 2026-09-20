@@ -240,6 +240,7 @@ amplify_outputs.json
 .claude/
 
 # ---- Superpowers skill scratch output ----
+.superpowers/
 docs/superpowers/
 .worktrees/
 
