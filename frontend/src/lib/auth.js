@@ -1,5 +1,16 @@
+function isMockOrQaSession() {
+  if (!import.meta.env.DEV) return false;
+  if (import.meta.env.VITE_USE_MOCKS === 'true') return true;
+  try {
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('aicfo_local_qa_user')) {
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 export async function signUpUser({ email, password, name }) {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockSignUp } = await import('../mocks/auth-mock.js');
     return mockSignUp({ email, name });
   }
@@ -12,7 +23,7 @@ export async function signUpUser({ email, password, name }) {
 }
 
 export async function confirmSignUpUser({ email, code }) {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockConfirmSignUp } = await import('../mocks/auth-mock.js');
     return mockConfirmSignUp({ email });
   }
@@ -21,7 +32,7 @@ export async function confirmSignUpUser({ email, code }) {
 }
 
 export async function resendSignUpCodeUser({ email }) {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockResendCode } = await import('../mocks/auth-mock.js');
     return mockResendCode({ email });
   }
@@ -30,7 +41,7 @@ export async function resendSignUpCodeUser({ email }) {
 }
 
 export async function signInUser({ email, password }) {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockSignIn } = await import('../mocks/auth-mock.js');
     return mockSignIn({ email });
   }
@@ -39,7 +50,7 @@ export async function signInUser({ email, password }) {
 }
 
 export async function signOutUser() {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockSignOut } = await import('../mocks/auth-mock.js');
     return mockSignOut();
   }
@@ -48,7 +59,7 @@ export async function signOutUser() {
 }
 
 export async function getCurrentAuthUser() {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockGetCurrentUser } = await import('../mocks/auth-mock.js');
     return mockGetCurrentUser();
   }
@@ -57,7 +68,7 @@ export async function getCurrentAuthUser() {
 }
 
 export async function signInWithGoogleRedirect() {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockSignIn } = await import('../mocks/auth-mock.js');
     return mockSignIn({ email: 'mock.user@example.com' });
   }

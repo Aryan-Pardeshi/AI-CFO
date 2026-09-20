@@ -15,8 +15,19 @@ function baseUrl() {
   return base.replace(/\/$/, '');
 }
 
+function isMockOrQaSession() {
+  if (!import.meta.env.DEV) return false;
+  if (import.meta.env.VITE_USE_MOCKS === 'true') return true;
+  try {
+    if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('aicfo_local_qa_user')) {
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
 async function accessToken() {
-  if (import.meta.env.DEV && import.meta.env.VITE_USE_MOCKS === 'true') {
+  if (isMockOrQaSession()) {
     const { mockIdToken } = await import('../mocks/auth-mock.js');
     return mockIdToken();
   }
@@ -28,7 +39,7 @@ async function accessToken() {
   return token;
 }
 
-export async function authenticatedRequest(path, { method = 'GET', body } = {}) {
+export async function authenticatedRequest(path, { method = 'GET', body, signal } = {}) {
   const token = await accessToken();
   const res = await fetch(`${baseUrl()}${path}`, {
     method,
@@ -37,6 +48,7 @@ export async function authenticatedRequest(path, { method = 'GET', body } = {}) 
       Authorization: `Bearer ${token}`,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal,
   });
   const text = await res.text();
   let data = null;

@@ -87,7 +87,7 @@ def test_five_routes_reject_missing_jwt(method, path, body):
 
 
 def test_other_routes_still_501(demo):
-    res = fin.handler(_event("GET", "/securities/search"), None)
+    res = fin.handler(_event("GET", "/securities/short-term-fit"), None)
     assert res["statusCode"] == 501
     assert json.loads(res["body"])["error"]["code"] == "NOT_IMPLEMENTED"
 

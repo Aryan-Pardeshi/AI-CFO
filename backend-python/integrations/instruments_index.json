@@ -1,0 +1,308 @@
+[
+  {
+    "instrument_key": "NSE_EQ|INE002A01018",
+    "symbol": "RELIANCE",
+    "name": "Reliance Industries Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE002A01018",
+    "sector": "ENERGY"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE040A01034",
+    "symbol": "HDFCBANK",
+    "name": "HDFC Bank Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE040A01034",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE009A01021",
+    "symbol": "INFY",
+    "name": "Infosys Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE009A01021",
+    "sector": "IT"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE467B01029",
+    "symbol": "TCS",
+    "name": "Tata Consultancy Services Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE467B01029",
+    "sector": "IT"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE090A01021",
+    "symbol": "ICICIBANK",
+    "name": "ICICI Bank Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE090A01021",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE030A01027",
+    "symbol": "HINDUNILVR",
+    "name": "Hindustan Unilever Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE030A01027",
+    "sector": "FMCG"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE154A01025",
+    "symbol": "ITC",
+    "name": "ITC Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE154A01025",
+    "sector": "FMCG"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE062A01020",
+    "symbol": "SBIN",
+    "name": "State Bank of India",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE062A01020",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE397D01024",
+    "symbol": "BHARTIARTL",
+    "name": "Bharti Airtel Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE397D01024",
+    "sector": "TELECOM"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE018A01030",
+    "symbol": "LT",
+    "name": "Larsen & Toubro Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE018A01030",
+    "sector": "INFRASTRUCTURE"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE155A01022",
+    "symbol": "TATAMOTORS",
+    "name": "Tata Motors Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE155A01022",
+    "sector": "AUTOMOBILES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE155A01022_TMPV",
+    "symbol": "TMPV",
+    "name": "Tata Motors Passenger Vehicles",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE155A01022",
+    "sector": "AUTOMOBILES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE044A01036",
+    "symbol": "SUNPHARMA",
+    "name": "Sun Pharmaceutical Industries Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE044A01036",
+    "sector": "HEALTHCARE"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE271C01023",
+    "symbol": "DLF",
+    "name": "DLF Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE271C01023",
+    "sector": "REAL_ESTATE"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE066F01012",
+    "symbol": "HAL",
+    "name": "Hindustan Aeronautics Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE066F01012",
+    "sector": "DEFENCE"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE364U01010",
+    "symbol": "ADANIGREEN",
+    "name": "Adani Green Energy Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE364U01010",
+    "sector": "RENEWABLE_EV"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE670A01012",
+    "symbol": "TATAELXSI",
+    "name": "Tata Elxsi Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE670A01012",
+    "sector": "IT"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE237A01028",
+    "symbol": "KOTAKBANK",
+    "name": "Kotak Mahindra Bank Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE237A01028",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE238A01034",
+    "symbol": "AXISBANK",
+    "name": "Axis Bank Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE238A01034",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE296A01024",
+    "symbol": "BAJFINANCE",
+    "name": "Bajaj Finance Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE296A01024",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE585B01010",
+    "symbol": "MARUTI",
+    "name": "Maruti Suzuki India Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE585B01010",
+    "sector": "AUTOMOBILES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE021A01026",
+    "symbol": "ASIANPAINT",
+    "name": "Asian Paints Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE021A01026",
+    "sector": "CONSUMER_DURABLES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE280A01028",
+    "symbol": "TITAN",
+    "name": "Titan Company Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE280A01028",
+    "sector": "CONSUMER_DURABLES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE075A01022",
+    "symbol": "WIPRO",
+    "name": "Wipro Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE075A01022",
+    "sector": "IT"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE860A01027",
+    "symbol": "HCLTECH",
+    "name": "HCL Technologies Ltd.",
+    "asset_type": "STOCK",
+    "exchange": "NSE",
+    "isin": "INE860A01027",
+    "sector": "IT"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01015",
+    "symbol": "NIFTYBEES",
+    "name": "Nippon India ETF Nifty BeES",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01015",
+    "sector": "INDEX"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01049",
+    "symbol": "JUNIORBEES",
+    "name": "Nippon India ETF Nifty Next 50 Junior BeES",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01049",
+    "sector": "INDEX"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01031",
+    "symbol": "BANKBEES",
+    "name": "Nippon India ETF Nifty Bank BeES",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01031",
+    "sector": "FINANCIAL_SERVICES"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01023",
+    "symbol": "GOLDBEES",
+    "name": "Nippon India ETF Gold BeES",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01023",
+    "sector": "GOLD"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01098",
+    "symbol": "ITBEES",
+    "name": "Nippon India ETF Nifty IT",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01098",
+    "sector": "IT"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF247L01AU4",
+    "symbol": "MON100",
+    "name": "Motilal Oswal Nasdaq 100 ETF",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF247L01AU4",
+    "sector": "AI_SEMI"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01056",
+    "symbol": "GILT5YBEES",
+    "name": "Nippon India ETF 5 Year Gilt",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01056",
+    "sector": "BONDS"
+  },
+  {
+    "instrument_key": "NSE_EQ|INF732E01080",
+    "symbol": "SILVERBEES",
+    "name": "Nippon India ETF Silver BeES",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INF732E01080",
+    "sector": "SILVER"
+  },
+  {
+    "instrument_key": "NSE_EQ|INE041025011",
+    "symbol": "EMBASSY",
+    "name": "Embassy Office Parks REIT",
+    "asset_type": "ETF",
+    "exchange": "NSE",
+    "isin": "INE041025011",
+    "sector": "REAL_ESTATE"
+  }
+]

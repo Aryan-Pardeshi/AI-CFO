@@ -10,8 +10,9 @@ function monthLabel(value) {
 }
 
 export function mapCashflowSummary(summary = {}) {
-  const totals = summary.totals || {};
-  const points = (summary.months || []).map((point) => ({
+  const safe = summary || {};
+  const totals = safe.totals || {};
+  const points = (safe.months || []).map((point) => ({
     name: monthLabel(point.month),
     Income: rupees(point.income_paise),
     Expenses: rupees(point.expense_paise),

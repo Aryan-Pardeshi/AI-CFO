@@ -27,8 +27,10 @@ from decimal import Decimal
 from boto3.dynamodb.conditions import Key
 
 from finance import fire as fire_engine
+from finance import fit as fit_engine
 from finance import networth as networth_engine
 from finance import portfolio as portfolio_engine
+from integrations import upstox
 from statements.categorizer import categorize_rows
 from statements.dto import TransactionDTO
 from statements.errors import (
@@ -83,6 +85,10 @@ ROUTES: list[tuple[str, str]] = [
 
 LIVE_ROUTES = {
     ("GET", "/portfolio/analysis"),
+    ("GET", "/securities/search"),
+    ("GET", "/securities/detail"),
+    ("GET", "/securities/history"),
+    ("GET", "/securities/fit"),
     ("POST", "/fire/calculate"),
     ("POST", "/fire/goal-impact"),
     ("GET", "/net-worth"),
@@ -710,6 +716,134 @@ def net_worth_projection_route(data: dict, query: dict) -> dict:
     )
 
 
+# ---------- Securities routes (Upstox + ARIA fit) ----------
+
+def securities_search_route(query: dict) -> dict:
+    q = (query or {}).get("q")
+    if not q or not isinstance(q, str) or not q.strip():
+        return _validation("Search query 'q' is required and must be non-empty")
+    try:
+        results = upstox.search_securities(q)
+        return _ok({"results": results})
+    except upstox.SecurityValidationError as exc:
+        return _validation(str(exc))
+    except upstox.SecurityUpstreamError as exc:
+        return _upstream(str(exc))
+
+
+def securities_detail_route(user_id: str, query: dict) -> dict:
+    instrument_key = (query or {}).get("instrument_key")
+    if not instrument_key or not isinstance(instrument_key, str) or not instrument_key.strip():
+        return _validation("instrument_key query parameter is required")
+    try:
+        detail = upstox.get_security_detail(instrument_key)
+    except upstox.SecurityValidationError as exc:
+        return _validation(str(exc))
+    except upstox.SecurityNotFoundError as exc:
+        return _not_found(str(exc))
+    except upstox.SecurityUpstreamError as exc:
+        return _upstream(str(exc))
+
+    # Check if the authenticated user owns this security
+    data = load_user_data(user_id)
+    holdings = data.get("holdings", [])
+    sec = detail.get("security") or {}
+    target_key = sec.get("instrument_key")
+    target_sym = (sec.get("symbol") or "").upper()
+    quote = detail.get("quote") or {}
+    current_price_paise = quote.get("last_price_paise")
+
+    user_holding = None
+    for h in holdings:
+        h_key = h.get("instrument_key")
+        h_sym = (h.get("symbol") or "").upper()
+        if (target_key and h_key == target_key) or (target_sym and h_sym == target_sym):
+            qty = float(h.get("quantity") or 0)
+            avg_price = int(h.get("avg_buy_price_paise") or 0)
+            invested_val = int(round(qty * avg_price))
+            curr_val = int(round(qty * current_price_paise)) if current_price_paise else invested_val
+            pnl_paise = curr_val - invested_val
+            pnl_pct = round((pnl_paise / invested_val) * 100, 2) if invested_val > 0 else 0.0
+            user_holding = {
+                "holding_id": h.get("holding_id"),
+                "symbol": sec.get("symbol"),
+                "quantity": qty if qty != int(qty) else int(qty),
+                "avg_buy_price_paise": avg_price,
+                "invested_value_paise": invested_val,
+                "current_value_paise": curr_val,
+                "unrealized_pnl_paise": pnl_paise,
+                "unrealized_pnl_pct": pnl_pct,
+            }
+            break
+
+    detail["holding"] = user_holding
+    return _ok(detail)
+
+
+def securities_history_route(query: dict) -> dict:
+    instrument_key = (query or {}).get("instrument_key")
+    if not instrument_key or not isinstance(instrument_key, str) or not instrument_key.strip():
+        return _validation("instrument_key query parameter is required")
+    period = (query or {}).get("period", "1y")
+    try:
+        history = upstox.get_security_history(instrument_key, period)
+        return _ok(history)
+    except upstox.SecurityValidationError as exc:
+        return _validation(str(exc))
+    except upstox.SecurityNotFoundError as exc:
+        return _not_found(str(exc))
+    except upstox.SecurityUpstreamError as exc:
+        return _upstream(str(exc))
+
+
+def securities_fit_route(user_id: str, query: dict) -> dict:
+    instrument_key = (query or {}).get("instrument_key")
+    if not instrument_key or not isinstance(instrument_key, str) or not instrument_key.strip():
+        return _validation("instrument_key query parameter is required")
+    raw_amount = (query or {}).get("add_amount_paise")
+    if raw_amount is None:
+        return _validation("add_amount_paise query parameter is required")
+    try:
+        add_amount_paise = int(raw_amount)
+    except (ValueError, TypeError):
+        return _validation("add_amount_paise must be an integer")
+    if add_amount_paise <= 0:
+        return _validation("add_amount_paise must be a positive integer in paise")
+    if add_amount_paise > 100000000000:
+        return _validation("add_amount_paise exceeds maximum supported amount")
+
+    inst = upstox.find_instrument(instrument_key)
+    if not inst:
+        return _not_found(f"Security '{instrument_key}' not found in index")
+
+    quote = None
+    source = "UPSTOX"
+    as_of = datetime.now(timezone.utc).isoformat()
+    try:
+        detail = upstox.get_security_detail(instrument_key)
+        quote = detail.get("quote")
+        source = detail.get("source", "UPSTOX")
+        as_of = detail.get("as_of", as_of)
+    except upstox.SecurityUpstreamError:
+        quote = None
+
+    data = load_user_data(user_id)
+    user_profile = data.get("user")
+    raw_holdings = data.get("holdings", [])
+    priced_holdings, _ = _priced_holdings(raw_holdings, _today())
+
+    result = fit_engine.calculate_portfolio_fit(
+        user_profile=user_profile,
+        holdings=priced_holdings,
+        security=inst,
+        add_amount_paise=add_amount_paise,
+        quote=quote,
+        source=source,
+        as_of=as_of,
+    )
+    return _ok(result)
+
+
 def _statement_bucket() -> str:
     bucket = os.environ.get("DATA_BUCKET")
     if not bucket:
@@ -1091,6 +1225,14 @@ def handler(event: dict, context) -> dict:
         data = load_user_data(user_id)
         if (method, path) == ("GET", "/portfolio/analysis"):
             return portfolio_analysis_route(data)
+        if (method, path) == ("GET", "/securities/search"):
+            return securities_search_route(query)
+        if (method, path) == ("GET", "/securities/detail"):
+            return securities_detail_route(user_id, query)
+        if (method, path) == ("GET", "/securities/history"):
+            return securities_history_route(query)
+        if (method, path) == ("GET", "/securities/fit"):
+            return securities_fit_route(user_id, query)
         if (method, path) == ("POST", "/fire/calculate"):
             return fire_calculate_route(data, body)
         if (method, path) == ("POST", "/fire/goal-impact"):
