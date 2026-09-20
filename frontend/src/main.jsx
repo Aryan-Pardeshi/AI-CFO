@@ -4,11 +4,15 @@ import { Amplify } from 'aws-amplify';
 import 'aws-amplify/auth/enable-oauth-listener';
 import App from './App.jsx';
 import './index.css';
+import { resolveOAuthRedirectUrl } from './lib/oauthRedirect.js';
 
 const userPoolId = import.meta.env.VITE_COGNITO_USER_POOL_ID;
 const userPoolClientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
 const domain = import.meta.env.VITE_COGNITO_DOMAIN;
-const redirectUrl = import.meta.env.VITE_OAUTH_REDIRECT_URL;
+const redirectUrl = resolveOAuthRedirectUrl(
+  window.location.origin,
+  import.meta.env.VITE_LOGIN_URL || '/login',
+);
 
 if (userPoolId && userPoolClientId) {
   const authConfig = {
