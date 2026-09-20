@@ -86,6 +86,47 @@ def test_run_completes_and_persists_without_raw_tool_output():
     assert published[0][0] == "/jobs/user-a/job-1"
 
 
+def test_completed_job_persists_safe_activity_citations_and_proposals():
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    class MetadataAgent(FakeAgent):
+        def run(self, message, history=None, tracker=None):
+            tracker.record("get_portfolio_analysis")
+            return FakeAgentResult("grounded", ["get_portfolio_analysis"])
+
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
+                                       "status": "QUEUED", "conversation_id": "c1"}
+    job = runner_mod.run_chat_job(
+        _payload(),
+        deps={"jobs_table": jobs, "conv_table": conv, "agent": MetadataAgent(),
+              "tracker": tools_mod.ToolCallTracker(), "publisher": lambda *a, **k: True},
+    )
+    assert isinstance(job["tool_activity"], list)
+    assert isinstance(job["citations"], list)
+    assert isinstance(job["proposed_actions"], list)
+    assert all("user_id" not in item for item in job["tool_activity"] + job["citations"] + job["proposed_actions"])
+
+
+def test_tool_activity_is_persisted_during_running_progress():
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {"user_id": "user-a", "job_id": "job-1",
+                                       "status": "QUEUED", "conversation_id": "c1"}
+    seen = []
+    runner_mod.run_chat_job(
+        _payload(),
+        deps={"jobs_table": jobs, "conv_table": conv, "agent": FakeAgent(),
+              "tracker": tools_mod.ToolCallTracker(),
+              "publisher": lambda _ch, event, data=None: seen.append((event, data)) or True},
+    )
+    assert any(event == "tool_start" for event, _ in seen)
+    assert jobs.items[("user-a", "job-1")].get("tool_activity")
+
+
 def test_run_history_capped_at_10():
     from agent import runner as runner_mod
     from agent import tools as tools_mod
@@ -102,6 +143,126 @@ def test_run_history_capped_at_10():
               "tracker": tools_mod.ToolCallTracker(), "publisher": lambda *a, **k: False},
     )
     assert agent.seen["history_len"] == 10
+
+
+def test_run_persists_standard_strands_stream_data_and_tool_use():
+    """A real Strands ``data``/``current_tool_use`` stream must reach the chat job."""
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    class StandardStrandsAgent:
+        def stream_async(self, *_args, **_kwargs):
+            async def stream():
+                yield {
+                    "current_tool_use": {
+                        "toolUseId": "tool-42",
+                        "name": "get_financial_snapshot",
+                        "input": {},
+                    }
+                }
+                yield {"data": "Your saved financial snapshot is ready."}
+
+            return stream()
+
+    jobs, conv = FakeJobs(), FakeConv()
+    jobs.items[("user-a", "job-1")] = {
+        "user_id": "user-a", "job_id": "job-1",
+        "status": "QUEUED", "conversation_id": "c1",
+    }
+    published = []
+    job = runner_mod.run_chat_job(
+        _payload(),
+        deps={
+            "jobs_table": jobs,
+            "conv_table": conv,
+            "agent": StandardStrandsAgent(),
+            "tracker": tools_mod.ToolCallTracker(),
+            "publisher": lambda _channel, event_type, _payload=None:
+                published.append(event_type) or True,
+        },
+    )
+
+    assert job["status"] == "COMPLETED"
+    assert job["answer"] == "Your saved financial snapshot is ready."
+    assert job["tool_calls"] == ["get_financial_snapshot"]
+    assert published.count("tool_start") == 1
+    assert published.count("tool_end") == 1
+
+
+def test_run_passes_persisted_turns_to_a_new_strands_agent():
+    """A fresh Lambda agent must receive the saved conversation, not only the latest turn."""
+    from agent import runner as runner_mod
+    from agent import tools as tools_mod
+
+    class CapturingStrandsAgent:
+        def __init__(self):
+            self.prompt = None
+
+        def stream_async(self, prompt, **_kwargs):
+            self.prompt = prompt
+
+            async def stream():
+                yield {"data": "I can use the earlier context."}
+
+            return stream()
+
+    history_rows = [
+        {
+            "user_conv": "user-a#c1",
+            "msg_sk": "2026-09-18T00:00:01Z#u1",
+            "role": "user",
+            "content": "My target is to retire at 45.",
+        },
+        {
+            "user_conv": "user-a#c1",
+            "msg_sk": "2026-09-18T00:00:02Z#a1",
+            "role": "assistant",
+            "content": "I will use age 45 for this conversation.",
+        },
+    ]
+    jobs, conv = FakeJobs(), FakeConv(history_rows)
+    jobs.items[("user-a", "job-1")] = {
+        "user_id": "user-a", "job_id": "job-1",
+        "status": "QUEUED", "conversation_id": "c1",
+    }
+    agent = CapturingStrandsAgent()
+
+    runner_mod.run_chat_job(
+        _payload(),
+        deps={
+            "jobs_table": jobs,
+            "conv_table": conv,
+            "agent": agent,
+            "tracker": tools_mod.ToolCallTracker(),
+            "publisher": lambda *_args, **_kwargs: False,
+        },
+    )
+
+    assert agent.prompt[:2] == [
+        {"role": "user", "content": [{"text": "My target is to retire at 45."}]},
+        {
+            "role": "assistant",
+            "content": [{"text": "I will use age 45 for this conversation."}],
+        },
+    ]
+    latest = agent.prompt[-1]["content"][0]["text"]
+    assert latest.startswith("Am I too concentrated?")
+    assert "get_portfolio_analysis" in latest
+
+
+def test_cashflow_turn_has_an_explicit_live_tool_route():
+    """A latest cashflow request must not be answered with a stale FIRE turn."""
+    from agent import runner as runner_mod
+
+    messages = runner_mod._strands_messages(
+        [{"role": "assistant", "content": "Your FIRE age is 46."}],
+        "Summarize my cashflow from saved transactions.",
+    )
+
+    latest = messages[-1]["content"][0]["text"]
+    assert "LATEST REQUEST" in latest
+    assert "get_cashflow_summary" in latest
+    assert "not calculate_fire" in latest
 
 
 def test_run_completes_even_if_publish_fails():

@@ -27,6 +27,76 @@ except Exception:  # pragma: no cover
 
 TOOL_CAP = 30
 
+SAFE_ACTION_ENTITIES = frozenset({
+    "profile", "dashboard_financials", "holding", "goal", "loan",
+    "fire_scenario", "transaction_category",
+})
+SAFE_ACTION_OPERATIONS = frozenset({"create", "update", "delete"})
+_IDENTITY_FIELDS = frozenset({
+    "user_id", "account_id", "account_number", "account_no", "customer_id",
+    "email", "phone", "mobile", "cognito_sub", "sub", "token", "secret",
+    "password", "authorization", "access_token", "refresh_token",
+})
+
+
+def _assert_safe_metadata(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not isinstance(key, str) or key.lower() in _IDENTITY_FIELDS:
+                raise ValueError("metadata contains an account identity field")
+            _assert_safe_metadata(child)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_safe_metadata(child)
+
+
+def record_activity(tool_name: str, status: str) -> dict:
+    """Build the small, UI-safe tool activity record persisted on a chat job."""
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ValueError("tool name is required")
+    if status not in {"started", "completed", "failed"}:
+        raise ValueError("invalid tool activity status")
+    return {"tool": tool_name.strip(), "status": status}
+
+
+def record_citation(source: str, as_of: str, title: str | None = None) -> dict:
+    """Build a citation without retaining a raw tool response or account data."""
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("citation source is required")
+    if not isinstance(as_of, str) or not as_of.strip():
+        raise ValueError("citation date is required")
+    result = {"source": source.strip(), "as_of": as_of.strip()}
+    if title is not None:
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("citation title must be non-empty")
+        result["title"] = title.strip()
+    _assert_safe_metadata(result)
+    return result
+
+
+def propose_action(entity: str, operation: str, *, target: str | None = None,
+                   payload: dict | None = None) -> dict:
+    """Validate a proposal; proposals are metadata only and are never persisted as writes."""
+    if entity not in SAFE_ACTION_ENTITIES:
+        raise ValueError("unsupported action entity")
+    if operation not in SAFE_ACTION_OPERATIONS:
+        raise ValueError("unsupported action operation")
+    if operation == "create" and target is not None:
+        raise ValueError("create actions cannot have a target")
+    if operation in {"update", "delete"} and (not isinstance(target, str) or not target.strip()):
+        raise ValueError("update/delete actions require a target")
+    if operation in {"create", "update"} and (not isinstance(payload, dict) or not payload):
+        raise ValueError("create/update actions require a payload")
+    if payload is not None:
+        _assert_safe_metadata(payload)
+    result = {"entity": entity, "operation": operation}
+    if target is not None:
+        result["target"] = target.strip()
+    if payload is not None:
+        result["payload"] = payload
+    _assert_safe_metadata(result)
+    return result
+
 
 class ToolCapExceeded(Exception):
     pass

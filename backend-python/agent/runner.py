@@ -97,6 +97,54 @@ def _fallback_agent_factories(deps: dict, uses_default_agent: bool):
     ]
 
 
+def _latest_turn_instruction(message: str) -> str:
+    """Keep a fresh request from being eclipsed by a persisted assistant turn."""
+
+    normalized = message.lower()
+    if any(term in normalized for term in (
+        "cashflow", "cash flow", "transaction", "transactions", "spending",
+        "spend", "income", "expenses", "expense",
+    )):
+        return (
+            "LATEST REQUEST ROUTING: This is a cashflow request. Call "
+            "get_cashflow_summary before answering. Do not calculate_fire or "
+            "reuse a prior FIRE answer for this request."
+        )
+    if "fire" in normalized or "financial independence" in normalized:
+        return (
+            "LATEST REQUEST ROUTING: This is a FIRE request. Call "
+            "calculate_fire before answering, unless the user explicitly asks "
+            "only about a prior answer."
+        )
+    if any(term in normalized for term in ("portfolio", "concentrat", "allocation")):
+        return (
+            "LATEST REQUEST ROUTING: This is a portfolio request. Call "
+            "get_portfolio_analysis before answering."
+        )
+    if "net worth" in normalized or "networth" in normalized:
+        return (
+            "LATEST REQUEST ROUTING: This is a net-worth request. Call "
+            "get_net_worth before answering."
+        )
+    return "LATEST REQUEST: Answer this new request; do not repeat a prior answer."
+
+
+def _strands_messages(history: list[dict], message: str) -> list[dict]:
+    """Build the documented Strands message-list input for one persisted turn."""
+
+    messages = []
+    for row in history:
+        role = row.get("role") if isinstance(row, dict) else None
+        content = row.get("content") if isinstance(row, dict) else None
+        if role in {"user", "assistant"} and isinstance(content, str) and content:
+            messages.append({"role": role, "content": [{"text": content}]})
+    messages.append({
+        "role": "user",
+        "content": [{"text": f"{message}\n\n{_latest_turn_instruction(message)}"}],
+    })
+    return messages
+
+
 def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
     """Execute one chat job. Test doubles go through `deps`; never live model in tests."""
     from agent import prompt as prompt_mod
@@ -115,8 +163,16 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
     channel = channel_for(user_id, job_id)
     jobs_table = None
     publisher = deps.get("publisher") or publish_job_event
+    metadata = {"tool_activity": [], "citations": [], "proposed_actions": []}
+    jobs_table_for_progress = None
+
+    def persist_progress():
+        if jobs_table_for_progress is not None:
+            store_mod.update_chat_job(jobs_table_for_progress, user_id, job_id, "RUNNING",
+                                      conversation_id=conversation_id, **metadata)
     try:
         jobs_table = deps.get("jobs_table") or store_mod.get_chat_jobs_table()
+        jobs_table_for_progress = jobs_table
         conv_table = deps.get("conv_table") or store_mod.get_conversations_table()
         tracker = deps.get("tracker") or tools_mod.ToolCallTracker(cap=tools_mod.TOOL_CAP)
         store_mod.update_chat_job(jobs_table, user_id, job_id, "RUNNING",
@@ -134,7 +190,7 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
 
         try:
             answer, tools_used = _invoke(agent, message, history, user_id, tracker,
-                                         channel, publisher, deps)
+                                         channel, publisher, deps, metadata, persist_progress)
         except Exception as exc:
             if not _is_kilo_provider_error(exc):
                 raise
@@ -151,7 +207,8 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
                 try:
                     fallback_agent = fallback_factory()
                     answer, tools_used = _invoke(
-                        fallback_agent, message, history, user_id, tracker, channel, publisher, deps
+                        fallback_agent, message, history, user_id, tracker, channel, publisher, deps,
+                        metadata, persist_progress
                     )
                     break
                 except Exception as fallback_exc:
@@ -164,8 +221,8 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
         store_mod.save_message(conv_table, user_id, conversation_id, "assistant",
                                answer, tools_used=tools_used)
         job = store_mod.update_chat_job(jobs_table, user_id, job_id, "COMPLETED",
-                                        conversation_id=conversation_id,
-                                        answer=answer, tool_calls=tools_used)
+                                        conversation_id=conversation_id, answer=answer,
+                                        tool_calls=tools_used, **metadata)
         try:
             publisher(channel, "done", {"job_id": job_id})
         except Exception:
@@ -184,35 +241,47 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
         if jobs_table is None:
             return {"user_id": user_id, "job_id": job_id,
                     "conversation_id": conversation_id, "status": "FAILED",
-                    "error": SAFE_CHAT_ERROR}
+                    "error": SAFE_CHAT_ERROR, **metadata}
         try:
             return store_mod.update_chat_job(jobs_table, user_id, job_id, "FAILED",
                                              conversation_id=conversation_id,
-                                             error=SAFE_CHAT_ERROR)
+                                             error=SAFE_CHAT_ERROR, **metadata)
         except Exception as mark_exc:
             logger.info({"event": "chat_job_failure_unpersisted",
                          "user_hash": _user_hash(user_id),
                          "error_class": type(mark_exc).__name__})
             return {"user_id": user_id, "job_id": job_id,
                     "conversation_id": conversation_id, "status": "FAILED",
-                    "error": SAFE_CHAT_ERROR}
+                    "error": SAFE_CHAT_ERROR, **metadata}
 
 
-def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps):
+def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
+            metadata=None, persist_progress=None):
     """Run the agent with deterministic cap + progress events. Returns (answer, tools_used)."""
     tools_used: list[str] = []
+    metadata = metadata if metadata is not None else {"tool_activity": [], "citations": [], "proposed_actions": []}
+    from agent import tools as tools_mod
 
     def _note_tool(name: str, phase: str):
-        tools_used.append(name) if phase == "end" else None
+        status = "started" if phase == "start" else "completed"
+        activity = tools_mod.record_activity(name, status)
+        if activity not in metadata["tool_activity"]:
+            metadata["tool_activity"].append(activity)
         try:
-            publisher(channel, f"tool_{phase}", {"tool": name})
+            publisher(channel, f"tool_{phase}", activity)
         except Exception:
             pass
+        if persist_progress:
+            persist_progress()
 
     # Test-double / fallback path: no stream_async means a simple double.
     if not hasattr(agent, "stream_async"):
         result = agent.run(message, history=history, tracker=tracker)
-        return result.text, list(getattr(result, "tools_used", []))
+        used = list(getattr(result, "tools_used", []))
+        for name in used:
+            _note_tool(name, "start")
+            _note_tool(name, "end")
+        return result.text, used
 
     # Strands path: stream with invocation_state carrying verified identity.
     import asyncio
@@ -221,24 +290,84 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps)
         nonlocal tools_used
         chunks: list[str] = []
         used: list[str] = []
+        started_tools: dict[str, str] = {}
+        finished_tools: set[str] = set()
+
+        def _tool_name(value) -> str | None:
+            if isinstance(value, dict):
+                value = value.get("name")
+            if not isinstance(value, str) or not value:
+                return None
+            return value
+
+        def _tool_key(value, name: str) -> str:
+            if isinstance(value, dict):
+                identifier = value.get("toolUseId") or value.get("tool_use_id")
+                if isinstance(identifier, str) and identifier:
+                    return identifier
+            return f"name:{name}"
+
+        def _start_tool(value) -> None:
+            name = _tool_name(value)
+            if name is None:
+                return
+            key = _tool_key(value, name)
+            if key not in started_tools:
+                started_tools[key] = name
+                _note_tool(name, "start")
+
+        def _finish_tool(value) -> None:
+            name = _tool_name(value)
+            if name is None:
+                return
+            key = _tool_key(value, name)
+            if key in started_tools and key not in finished_tools:
+                finished_tools.add(key)
+                _note_tool(started_tools[key], "end")
+                used.append(started_tools[key])
+
         try:
             stream = agent.stream_async(
-                message,
+                _strands_messages(history, message),
                 invocation_state={"user_id": user_id, "tracker": tracker,
-                                  "history": history},
+                                  "history": history, "metadata": metadata},
             )
         except TypeError:
-            stream = agent.stream_async(message)
+            stream = agent.stream_async(_strands_messages(history, message))
         async for event in stream:
             if isinstance(event, dict):
-                if event.get("tool_start"):
-                    name = str(event["tool_start"])
-                    _note_tool(name, "start")
-                if event.get("tool_end"):
-                    _note_tool(str(event["tool_end"]), "end")
-                    used.append(str(event["tool_end"]))
-                if event.get("text_delta"):
-                    chunks.append(str(event["text_delta"]))
+                # Standard Strands fields (``data`` and ``current_tool_use``),
+                # plus the legacy aliases used by our local doubles.
+                _start_tool(event.get("current_tool_use"))
+                _start_tool(event.get("tool_start"))
+                _finish_tool(event.get("tool_end"))
+                for citation in event.get("citations", []) if isinstance(event.get("citations"), list) else []:
+                    if isinstance(citation, dict) and citation.get("source") and citation.get("as_of"):
+                        try:
+                            item = tools_mod.record_citation(citation["source"], citation["as_of"], citation.get("title"))
+                            if item not in metadata["citations"]:
+                                metadata["citations"].append(item)
+                        except ValueError:
+                            pass
+                action = event.get("proposed_action")
+                if isinstance(action, dict):
+                    try:
+                        item = tools_mod.propose_action(action.get("entity"), action.get("operation"),
+                                                        target=action.get("target"), payload=action.get("payload"))
+                        if item not in metadata["proposed_actions"]:
+                            metadata["proposed_actions"].append(item)
+                    except (TypeError, ValueError):
+                        pass
+                if persist_progress:
+                    persist_progress()
+                text = event.get("data")
+                if not isinstance(text, str):
+                    text = event.get("text_delta")
+                if isinstance(text, str):
+                    chunks.append(text)
+        for key, name in started_tools.items():
+            if key not in finished_tools:
+                _finish_tool({"toolUseId": key, "name": name})
         return "".join(chunks), used
 
     try:

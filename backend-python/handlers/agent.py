@@ -112,6 +112,9 @@ def get_chat_job_route(user_id: str, job_id: str) -> dict:
         out["error"] = SAFE_CHAT_ERROR
     if item.get("tool_calls") is not None:
         out["tool_calls"] = item["tool_calls"]
+    out["tool_activity"] = item.get("tool_activity") or []
+    out["citations"] = item.get("citations") or []
+    out["proposed_actions"] = item.get("proposed_actions") or []
     return _ok(out)
 
 
