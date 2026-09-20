@@ -61,13 +61,16 @@
   background-color: var(--surface-color);
   border-bottom: 1px solid var(--border-color);
   padding: 0.5rem 1rem 1.25rem;
-  position: absolute;
+  /* Fixed, not absolute: the header is sticky, so the drawer has to stay pinned under it
+     however far the page has scrolled. Absolute placed it at the top of the document. */
+  position: fixed;
   top: 60px;
   left: 0;
   right: 0;
   z-index: 99;
   box-shadow: var(--shadow-md);
   max-height: calc(100vh - 60px);
+  max-height: calc(100dvh - 60px);
   overflow-y: auto;
 }
 

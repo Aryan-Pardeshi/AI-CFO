@@ -49,9 +49,12 @@ export function Nav() {
     <header
       className={cn(
         "fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-300",
-        scrolled
-          ? "border-b border-line bg-cream/85 backdrop-blur-md"
-          : "border-b border-transparent bg-transparent",
+        // Solid while the mobile menu is open, so page content doesn't ghost through it.
+        open
+          ? "border-b border-transparent bg-cream"
+          : scrolled
+            ? "border-b border-line bg-cream/85 backdrop-blur-md"
+            : "border-b border-transparent bg-transparent",
       )}
     >
       {/* page progress */}
@@ -146,7 +149,7 @@ export function Nav() {
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden border-b border-line bg-cream/95 backdrop-blur-md md:hidden"
+            className="overflow-hidden border-b border-line bg-cream md:hidden"
           >
             <div className="flex flex-col gap-1 px-5 pb-6 pt-2">
               {LINKS.map((link) => (

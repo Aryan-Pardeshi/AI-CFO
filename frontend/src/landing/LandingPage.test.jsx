@@ -3,7 +3,7 @@
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import React from 'react';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { MemoryRouter } from 'react-router-dom';
 import LandingPage from './LandingPage';
@@ -86,6 +86,18 @@ describe('landing page links', () => {
     const logos = screen.getAllByRole('img', { name: 'ARIA' });
     expect(logos.length).toBeGreaterThanOrEqual(2);
     logos.forEach((logo) => expect(logo).toHaveAttribute('src', '/aria-logo.png'));
+  });
+
+  test('the mobile menu opens with a solid background so page content does not ghost through', () => {
+    const { container } = renderLanding();
+    const header = container.querySelector('header');
+    expect(header.className).toContain('bg-transparent');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
+
+    expect(header.className).toContain('bg-cream');
+    expect(header.className).not.toContain('bg-transparent');
+    expect(screen.getByRole('button', { name: 'Close menu' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   test('marks the page with the landing scope class while mounted', () => {
