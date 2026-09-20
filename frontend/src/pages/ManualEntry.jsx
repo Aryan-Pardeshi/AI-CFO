@@ -136,6 +136,9 @@ const ManualEntry = () => {
         personalLoanEmi: liabilities.personalLoanEmi,
         educationLoanEmi: liabilities.educationLoanEmi,
         creditCardDebt: liabilities.creditCardDebt,
+        creditCardIssuer: liabilities.creditCardIssuer || 'HDFC Bank',
+        creditCardLimit: liabilities.creditCardLimit || '250000',
+        creditCardDueDate: liabilities.creditCardDueDate || '2026-10-05',
       },
       monthlyExpenses: {
         rent: expenses.rent,
@@ -347,16 +350,23 @@ const ManualEntry = () => {
           </div>
         )}
 
-        {/* ========== STEP 4: LIABILITIES & ITEMIZED EXPENSES ========== */}
+        {/* ========== STEP 4: LIABILITIES, CREDIT CARDS & ITEMIZE EXPENSES ========== */}
         {step === 4 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            <h3 style={{ margin: 0, fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Liabilities (Monthly EMIs / Debts)</h3>
+            <h3 style={{ margin: 0, fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Credit Cards & Statement Details</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', background: 'var(--bg-color)', padding: '1.25rem', border: '1px solid var(--border-color)' }}>
+              <Input label="Primary Credit Card Issuer / Name" id="creditCardIssuer" value={liabilities.creditCardIssuer || ''} onChange={handleInputChange(setLiabilities)} placeholder="e.g. HDFC Regalia / ICICI Bank" />
+              <Input label="Total Credit Limit (₹)" id="creditCardLimit" type="number" value={liabilities.creditCardLimit || ''} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 300000" />
+              <Input label="Current Outstanding Balance (₹)" id="creditCardDebt" type="number" value={liabilities.creditCardDebt} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 24500" />
+              <Input label="Statement Due Date" id="creditCardDueDate" type="date" value={liabilities.creditCardDueDate || ''} onChange={handleInputChange(setLiabilities)} />
+            </div>
+
+            <h3 style={{ margin: 0, fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Loans & EMIs</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
               <Input label="Home Loan EMI (₹)" id="homeLoanEmi" type="number" value={liabilities.homeLoanEmi} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 35000" />
               <Input label="Car / Vehicle Loan EMI (₹)" id="carLoanEmi" type="number" value={liabilities.carLoanEmi} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 12000" />
               <Input label="Personal Loan EMI (₹)" id="personalLoanEmi" type="number" value={liabilities.personalLoanEmi} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 8000" />
               <Input label="Education Loan EMI (₹)" id="educationLoanEmi" type="number" value={liabilities.educationLoanEmi} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 5000" />
-              <Input label="Credit Card Outstanding Balance (₹)" id="creditCardDebt" type="number" value={liabilities.creditCardDebt} onChange={handleInputChange(setLiabilities)} placeholder="e.g. 15000" />
             </div>
 
             <h3 style={{ margin: 0, fontSize: '1rem', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Monthly Living Expenses (Itemized)</h3>

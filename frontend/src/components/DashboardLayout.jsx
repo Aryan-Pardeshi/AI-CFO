@@ -56,6 +56,7 @@ const DashboardLayout = () => {
         <nav style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
           <NavLink to="/overview" style={navLinkStyle}>Overview</NavLink>
           <NavLink to="/ai-advisory" style={navLinkStyle}>ARIA Advisory</NavLink>
+          <NavLink to="/monthly-tracker" style={navLinkStyle}>Monthly Tracker</NavLink>
           <NavLink to="/milestones" style={navLinkStyle}>Milestones</NavLink>
           <NavLink to="/balance-sheet" style={navLinkStyle}>Balance Sheet</NavLink>
           <NavLink to="/news" style={navLinkStyle}>News & Intelligence</NavLink>

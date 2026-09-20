@@ -16,7 +16,7 @@ const News = () => {
     try {
       setRefreshing(true);
       const userRes = await fetch(`http://localhost:5000/api/auth/user/${encodeURIComponent(userEmail)}`);
-      let tickers = ['AAPL', 'RELIANCE.NS'];
+      let tickers = [];
       let industries = [];
       let instruments = [];
 
@@ -36,7 +36,12 @@ const News = () => {
         instruments = prefs.instruments || [];
       }
 
-      const newsRes = await fetch(`http://localhost:5000/api/portfolio/news?tickers=${tickers.join(',')}`);
+      const newsParams = new URLSearchParams();
+      if (tickers.length > 0) newsParams.append('tickers', tickers.join(','));
+      if (industries.length > 0) newsParams.append('industries', industries.join(','));
+      if (instruments.length > 0) newsParams.append('instruments', instruments.join(','));
+
+      const newsRes = await fetch(`http://localhost:5000/api/portfolio/news?${newsParams.toString()}`);
       if (newsRes.ok) {
         const newsJson = await newsRes.json();
         setNews(newsJson.news || []);

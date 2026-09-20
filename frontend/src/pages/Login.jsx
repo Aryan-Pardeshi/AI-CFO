@@ -3,12 +3,22 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useGoogleLogin } from '@react-oauth/google';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import LoadingScreen from '../components/ui/LoadingScreen';
 import { useAuth } from '../context/AuthContext';
 
 const Login = () => {
   const [error, setError] = useState('');
+  const [isLoadingScreen, setIsLoadingScreen] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
+
+  const triggerLoginSuccess = (email, hasOnboarded) => {
+    setIsLoadingScreen(true);
+    setTimeout(() => {
+      login(email);
+      navigate(hasOnboarded ? '/overview' : '/onboarding');
+    }, 1250);
+  };
 
   const handleGoogleSuccess = async (tokenResponse) => {
     try {
@@ -29,8 +39,7 @@ const Login = () => {
 
       if (response.ok) {
         const data = await response.json();
-        login(userInfo.email);
-        navigate(data.hasOnboarded ? '/overview' : '/onboarding');
+        triggerLoginSuccess(userInfo.email, data.hasOnboarded);
       } else {
         const data = await response.json();
         setError(data.error || 'Google login failed');
@@ -64,13 +73,16 @@ const Login = () => {
       if (!response.ok) {
         setError(data.error || 'Login failed');
       } else {
-        login(email);
-        navigate(data.hasOnboarded ? '/overview' : '/onboarding');
+        triggerLoginSuccess(email, data.hasOnboarded);
       }
     } catch (err) {
       setError('Network error. Please try again.');
     }
   };
+
+  if (isLoadingScreen) {
+    return <LoadingScreen message="Authenticating & Launching Dashboard..." />;
+  }
 
   return (
     <div style={{ 

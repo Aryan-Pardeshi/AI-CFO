@@ -34,15 +34,17 @@ router.get('/prices', async (req, res) => {
   }
 });
 
-// 2. Asset Specific News (Yahoo Finance style)
+// 2. Asset Specific & Preference-Based Market News (Yahoo Finance style)
 router.get('/news', async (req, res) => {
   try {
-    const { tickers } = req.query;
+    const { tickers = '', industries = '', instruments = '' } = req.query;
     const tickerList = tickers ? tickers.split(',').map(t => t.trim().toUpperCase()).filter(Boolean) : [];
+    const industryList = industries ? industries.split(',').map(i => i.trim()).filter(Boolean) : [];
+    const instrumentList = instruments ? instruments.split(',').map(i => i.trim()).filter(Boolean) : [];
 
     let newsItems = [];
 
-    // Fetch news from Yahoo Finance for provided tickers
+    // Search Yahoo Finance for user's active holding tickers
     for (const ticker of tickerList) {
       try {
         const searchResult = await yahooFinance.search(ticker, { newsCount: 3 });
@@ -61,15 +63,41 @@ router.get('/news', async (req, res) => {
           });
         }
       } catch (err) {
-        console.warn(`Yahoo news fetch fallback for ${ticker}:`, err.message);
+        console.warn(`Yahoo news fetch for ${ticker}:`, err.message);
       }
     }
 
-    // High quality curated market fallbacks if online search returns fewer items
-    const fallbackNews = [
+    // Search Yahoo Finance for user's registered preference industries if no stock tickers are held
+    if (tickerList.length === 0 && industryList.length > 0) {
+      for (const ind of industryList.slice(0, 3)) {
+        try {
+          const searchResult = await yahooFinance.search(ind, { newsCount: 3 });
+          if (searchResult && searchResult.news && searchResult.news.length > 0) {
+            searchResult.news.forEach(item => {
+              newsItems.push({
+                id: item.uuid || `ind-${Date.now()}-${Math.random()}`,
+                ticker: ind.toUpperCase(),
+                title: item.title,
+                publisher: item.publisher || 'Yahoo Finance',
+                link: item.link || `https://finance.yahoo.com`,
+                publishedAt: item.providerPublishTime ? new Date(item.providerPublishTime * 1000).toISOString() : new Date().toISOString(),
+                summary: item.summary || `Market analysis and trends in the ${ind} sector.`,
+                thumbnail: null
+              });
+            });
+          }
+        } catch (err) {
+          console.warn(`Yahoo news fetch for industry ${ind}:`, err.message);
+        }
+      }
+    }
+
+    // Comprehensive catalog of curated market news categorized by industry / ticker
+    const fallbackCatalog = [
       {
         id: 'news-rel-1',
         ticker: 'RELIANCE.NS',
+        industry: 'Renewable Energy & EV',
         title: 'Reliance Retail Expands Omnichannel AI Infrastructure with Major Supply Chain Investment',
         publisher: 'Economic Times',
         link: 'https://economictimes.indiatimes.com',
@@ -80,6 +108,7 @@ router.get('/news', async (req, res) => {
       {
         id: 'news-aapl-1',
         ticker: 'AAPL',
+        industry: 'Technology & Software',
         title: 'Apple Services Revenue Hits Record High Amid Global Hardware Ecosystem Expansion',
         publisher: 'Bloomberg',
         link: 'https://finance.yahoo.com/quote/AAPL',
@@ -88,40 +117,63 @@ router.get('/news', async (req, res) => {
         thumbnail: null
       },
       {
-        id: 'news-mf-1',
-        ticker: 'MUTUAL FUNDS',
-        title: 'SIP Inflows in Indian Equities Cross All-Time Milestone of ₹23,000 Crore',
-        publisher: 'Mint',
-        link: 'https://www.livemint.com',
-        publishedAt: new Date(Date.now() - 3600 * 1000 * 7).toISOString(),
-        summary: 'Retail investors increase allocations into large-cap and flexi-cap index funds, cushioning markets against global volatility.',
-        thumbnail: null
-      },
-      {
-        id: 'news-macro-1',
-        ticker: 'GLOBAL MACRO',
-        title: 'Central Banks Signal Rate Cut Trajectory: What It Means for Capital Allocation & Equities',
-        publisher: 'Reuters',
-        link: 'https://www.reuters.com',
-        publishedAt: new Date(Date.now() - 3600 * 1000 * 12).toISOString(),
-        summary: 'Global liquidity conditions ease as bond yields soften, boosting inflows into emerging market equity portfolios.',
+        id: 'news-tcs-1',
+        ticker: 'TCS.NS',
+        industry: 'Technology & Software',
+        title: 'Indian IT Giants Report Accelerating Enterprise Cloud & GenAI Project Conversions',
+        publisher: 'Business Standard',
+        link: 'https://www.business-standard.com',
+        publishedAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
+        summary: 'Tier-1 IT service exporters see multi-year deal wins in North America and Europe as enterprise tech spending rebounds.',
         thumbnail: null
       },
       {
         id: 'news-hdfc-1',
         ticker: 'HDFCBANK.NS',
+        industry: 'Banking & FinTech',
         title: 'Private Banking Sector Reports Robust Net Interest Margins and Credit Growth',
         publisher: 'Business Standard',
         link: 'https://www.business-standard.com',
-        publishedAt: new Date(Date.now() - 3600 * 1000 * 16).toISOString(),
+        publishedAt: new Date(Date.now() - 3600 * 1000 * 6).toISOString(),
         summary: 'Asset quality remains pristine across premier private lenders with deposit growth outpacing quarterly targets.',
+        thumbnail: null
+      },
+      {
+        id: 'news-crypto-1',
+        ticker: 'CRYPTO',
+        industry: 'Crypto & Web3 Assets',
+        title: 'Institutional Crypto Adoption Surges as Spot Bitcoin & Ethereum ETFs Record Net Inflows',
+        publisher: 'CoinDesk',
+        link: 'https://www.coindesk.com',
+        publishedAt: new Date(Date.now() - 3600 * 1000 * 8).toISOString(),
+        summary: 'Asset managers report record inflows into regulated crypto index products as sovereign wealth funds explore digital asset allocations.',
+        thumbnail: null
+      },
+      {
+        id: 'news-gold-1',
+        ticker: 'GOLD',
+        industry: 'Bonds & Fixed Income',
+        title: 'Sovereign Gold Bonds & Physical Bullion Rally Amid Global Central Bank Purchases',
+        publisher: 'Mint',
+        link: 'https://www.livemint.com',
+        publishedAt: new Date(Date.now() - 3600 * 1000 * 10).toISOString(),
+        summary: 'Gold prices maintain strong momentum as global central banks diversify reserves into precious metal assets.',
         thumbnail: null
       }
     ];
 
-    // Combine Yahoo News with curated fallback to ensure rich feeds
-    const allNews = [...newsItems, ...fallbackNews];
-    // Deduplicate by title
+    // Filter fallbacks strictly based on user's active holdings or registered industry preferences
+    let matchedFallbacks = fallbackCatalog.filter(item => {
+      const matchesTicker = tickerList.includes(item.ticker);
+      const matchesIndustry = industryList.some(ind => ind.toLowerCase().includes(item.industry.toLowerCase()) || item.industry.toLowerCase().includes(ind.toLowerCase()));
+      return matchesTicker || matchesIndustry;
+    });
+
+    if (matchedFallbacks.length === 0 && newsItems.length === 0) {
+      matchedFallbacks = fallbackCatalog.slice(0, 3);
+    }
+
+    const allNews = [...newsItems, ...matchedFallbacks];
     const uniqueNews = Array.from(new Map(allNews.map(item => [item.title, item])).values());
 
     res.json({ news: uniqueNews });
@@ -131,20 +183,19 @@ router.get('/news', async (req, res) => {
   }
 });
 
-// 3. Personalized Stock & Asset Suggestions based on User Preferences
+// 3. Personalized Stock & Asset Suggestions based strictly on User Preferences & Holdings
 router.get('/suggestions', async (req, res) => {
   try {
     const { industries = '', instruments = '' } = req.query;
     const selectedIndustries = industries.split(',').map(s => s.trim()).filter(Boolean);
     const selectedInstruments = instruments.split(',').map(s => s.trim()).filter(Boolean);
 
-    // Database of curated recommendations across sectors
     const recommendationCatalog = [
       {
         ticker: 'TCS.NS',
         name: 'Tata Consultancy Services',
-        industry: 'Technology',
-        instrument: 'Equities',
+        industry: 'Technology & Software',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Industry-leading operating margins, strong AI pipeline, and consistent 3%+ dividend yield.',
         price: 4180.50,
         change: '+1.45%'
@@ -152,8 +203,8 @@ router.get('/suggestions', async (req, res) => {
       {
         ticker: 'INFY.NS',
         name: 'Infosys Limited',
-        industry: 'Technology',
-        instrument: 'Equities',
+        industry: 'Technology & Software',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Robust cloud and generative AI deal-wins with enterprise clients worldwide.',
         price: 1890.20,
         change: '+0.85%'
@@ -161,8 +212,8 @@ router.get('/suggestions', async (req, res) => {
       {
         ticker: 'NVDA',
         name: 'NVIDIA Corporation',
-        industry: 'Technology',
-        instrument: 'Equities',
+        industry: 'Artificial Intelligence & Semi',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Monopoly position in accelerated data center hardware and sovereign AI infrastructure.',
         price: 118.80,
         change: '+3.20%'
@@ -171,7 +222,7 @@ router.get('/suggestions', async (req, res) => {
         ticker: 'HDFCBANK.NS',
         name: 'HDFC Bank Ltd',
         industry: 'Banking & FinTech',
-        instrument: 'Equities',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Dominant private sector market share with accelerating post-merger synergies and loan growth.',
         price: 1675.00,
         change: '+0.60%'
@@ -180,7 +231,7 @@ router.get('/suggestions', async (req, res) => {
         ticker: 'ICICIBANK.NS',
         name: 'ICICI Bank Ltd',
         industry: 'Banking & FinTech',
-        instrument: 'Equities',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Consistent ROE expansion above 18% with peer-leading digital underwriting.',
         price: 1220.40,
         change: '+1.10%'
@@ -188,8 +239,8 @@ router.get('/suggestions', async (req, res) => {
       {
         ticker: 'TATAPOWER.NS',
         name: 'Tata Power Company',
-        industry: 'Renewable Energy',
-        instrument: 'Equities',
+        industry: 'Renewable Energy & EV',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Aggressive capacity expansion in solar rooftop, utility EV charging, and green energy contracts.',
         price: 442.80,
         change: '+2.40%'
@@ -198,7 +249,7 @@ router.get('/suggestions', async (req, res) => {
         ticker: 'SUNPHARMA.NS',
         name: 'Sun Pharmaceutical',
         industry: 'Healthcare & Pharma',
-        instrument: 'Equities',
+        instrument: 'Equities (Direct Stocks)',
         rationale: 'Strong global specialty portfolio driving double-digit margin growth.',
         price: 1810.00,
         change: '+0.95%'
@@ -207,7 +258,7 @@ router.get('/suggestions', async (req, res) => {
         ticker: 'PPFAS-FLEXI',
         name: 'Parag Parikh Flexi Cap Fund',
         industry: 'Diversified',
-        instrument: 'Mutual Funds',
+        instrument: 'Index & Mutual Funds',
         rationale: 'Value-oriented multi-cap fund with tactical exposure to US tech leaders and Indian blue chips.',
         price: 78.45,
         change: '+0.42%'
@@ -216,7 +267,7 @@ router.get('/suggestions', async (req, res) => {
         ticker: 'UTI-NIFTY50',
         name: 'UTI Nifty 50 Index Fund',
         industry: 'Index',
-        instrument: 'Mutual Funds',
+        instrument: 'Index & Mutual Funds',
         rationale: 'Ultra-low tracking error and lowest expense ratio (0.05%) for compounding broad market gains.',
         price: 168.20,
         change: '+0.55%'
@@ -225,7 +276,7 @@ router.get('/suggestions', async (req, res) => {
         ticker: 'GOLDBEES.NS',
         name: 'Nippon India ETF Gold BeES',
         industry: 'Commodities',
-        instrument: 'ETFs & Gold',
+        instrument: 'Gold & Precious Metals',
         rationale: 'Premier hedge against currency depreciation with 99.5% physical gold backing.',
         price: 66.80,
         change: '+0.30%'
@@ -233,15 +284,21 @@ router.get('/suggestions', async (req, res) => {
     ];
 
     let filtered = recommendationCatalog;
+
     if (selectedIndustries.length > 0 || selectedInstruments.length > 0) {
-      filtered = recommendationCatalog.filter(item => 
-        selectedIndustries.some(ind => item.industry.toLowerCase().includes(ind.toLowerCase())) ||
-        selectedInstruments.some(inst => item.instrument.toLowerCase().includes(inst.toLowerCase()))
-      );
+      filtered = recommendationCatalog.filter(item => {
+        const matchesInd = selectedIndustries.some(ind => 
+          item.industry.toLowerCase().includes(ind.toLowerCase()) || ind.toLowerCase().includes(item.industry.toLowerCase())
+        );
+        const matchesInst = selectedInstruments.some(inst => 
+          item.instrument.toLowerCase().includes(inst.toLowerCase()) || inst.toLowerCase().includes(item.instrument.toLowerCase())
+        );
+        return matchesInd || matchesInst;
+      });
     }
 
     if (filtered.length === 0) {
-      filtered = recommendationCatalog.slice(0, 6);
+      filtered = recommendationCatalog.slice(0, 4);
     }
 
     res.json({

@@ -85,3 +85,16 @@ h1, h2, h3, h4, h5, h6 {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* ─── Landing Page ─────────────────────────────────── */
+.landing-root {
+  font-family: var(--font-sans);
+  background-color: var(--bg-color);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+.landing-root section {
+  scroll-margin-top: 68px;
+}
+
