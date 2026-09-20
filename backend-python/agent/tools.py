@@ -39,8 +39,20 @@ _IDENTITY_FIELDS = frozenset({
     "password", "authorization", "access_token", "refresh_token",
 })
 _MAX_METADATA_STRING = 500
-_SUSPICIOUS_VALUE = re.compile(r"(?:api[_ -]?key|private[_ -]?key|secret|password|authorization|access[_ -]?token|refresh[_ -]?token|account[_ -]?(?:number|no|id))\s*[:=]|\b\d{8,}\b", re.IGNORECASE)
+_SUSPICIOUS_VALUE = re.compile(r"(?:api[_ -]?key|private[_ -]?key|secret|password|authorization|access[_ -]?token|refresh[_ -]?token|account[_ -]?(?:number|no|id))|\b\d{8,}\b", re.IGNORECASE)
 _RAW_FIELDS = frozenset({"result", "raw", "output", "response", "toolresult", "tooloutput"})
+_ACTION_FIELDS = {
+    "profile": {"name", "date_of_birth", "base_currency", "monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "declared_net_worth_paise", "cash_balance_paise", "emergency_fund_target_months", "risk_profile", "risk_score", "investment_horizon_years", "strategy_goal", "dependents_count", "employment_type", "city_tier", "onboarded"},
+    "dashboard_financials": {"monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "cash_balance_paise", "declared_net_worth_paise"},
+    "holding": {"asset_type", "source", "instrument_key", "symbol", "isin", "name", "quantity", "avg_buy_price_paise", "first_buy_date", "manual_current_value_paise", "sector", "sip_monthly_paise", "fd_type", "fd_principal_paise", "fd_annual_rate", "fd_start_date", "fd_maturity_date"},
+    "goal": {"name", "goal_type", "amount_today_paise", "target_age", "inflation_rate"},
+    "loan": {"name", "loan_type", "outstanding_paise", "annual_rate", "tenure_months", "prepayment_charge_pct", "rate_type"},
+    "fire_scenario": {"goal_type", "amount_today_paise", "target_age"},
+    "transaction_category": {"category"},
+}
+_PAISE_FIELDS = {field for fields in _ACTION_FIELDS.values() for field in fields if field.endswith("_paise")}
+_RATIO_FIELDS = {"annual_rate", "fd_annual_rate", "inflation_rate", "prepayment_charge_pct"}
+_INT_RANGES = {"target_age": (18, 91), "tenure_months": (1, 480), "emergency_fund_target_months": (0, 120), "investment_horizon_years": (1, 91), "dependents_count": (0, 20), "risk_score": (4, 12)}
 
 
 def _normalized_key(key: str) -> str:
@@ -79,6 +91,36 @@ def _assert_safe_metadata(value: Any) -> None:
         raise ValueError("metadata value has an unsupported type")
 
 
+def _validate_action_payload(entity: str, payload: dict) -> dict:
+    if any(not isinstance(key, str) or key not in _ACTION_FIELDS[entity] for key in payload):
+        raise ValueError("unsupported proposal payload field")
+    if any(isinstance(value, (dict, list)) for value in payload.values()):
+        raise ValueError("nested proposal payloads are not supported")
+    for key, value in payload.items():
+        if key in _PAISE_FIELDS or key in _INT_RANGES:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("proposal numeric field must be an integer")
+            if value < 0 or (key in _INT_RANGES and not _INT_RANGES[key][0] <= value <= _INT_RANGES[key][1]):
+                raise ValueError("proposal numeric field is out of range")
+        elif key in _RATIO_FIELDS:
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 0.36:
+                raise ValueError("proposal rate is out of range")
+        elif key == "onboarded":
+            if not isinstance(value, bool):
+                raise ValueError("onboarded must be boolean")
+        elif key == "quantity":
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                raise ValueError("quantity must be numeric")
+        elif not isinstance(value, str):
+            raise ValueError("proposal label must be a string")
+        elif key.endswith("_date") or key == "date_of_birth":
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                raise ValueError("proposal date must be ISO formatted")
+        else:
+            _safe_string(value, field=key)
+    return payload
+
+
 def record_activity(tool_name: str, status: str) -> dict:
     """Build the small, UI-safe tool activity record persisted on a chat job."""
     tool_name = _safe_string(tool_name, field="tool")
@@ -93,7 +135,8 @@ def record_activity(tool_name: str, status: str) -> dict:
     return {"tool": tool_name.strip(), "status": status}
 
 
-def record_citation(source: str, as_of: str, title: str | None = None) -> dict:
+def record_citation(source: str, as_of: str, title: str | None = None,
+                    *, domain: str | None = None, url: str | None = None) -> dict:
     """Build a citation without retaining a raw tool response or account data."""
     source = _safe_string(source, field="source")
     as_of = _safe_string(as_of, field="as_of")
@@ -102,6 +145,16 @@ def record_citation(source: str, as_of: str, title: str | None = None) -> dict:
     result = {"source": source, "as_of": as_of}
     if title is not None:
         result["title"] = _safe_string(title, field="title")
+    if domain is not None:
+        domain = _safe_string(domain, field="domain")
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,100}", domain) or "." not in domain:
+            raise ValueError("citation domain is invalid")
+        result["domain"] = domain.lower()
+    if url is not None:
+        url = _safe_string(url, field="url")
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]{1,100}(?:/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,180})?", url):
+            raise ValueError("citation URL is invalid")
+        result["url"] = url
     _assert_safe_metadata(result)
     return result
 
@@ -123,6 +176,7 @@ def propose_action(entity: str, operation: str, *, target: str | None = None,
     if target is not None:
         target = _safe_string(target, field="target")
     if payload is not None:
+        _validate_action_payload(entity, payload)
         _assert_safe_metadata(payload)
     result = {"entity": entity, "operation": operation}
     if target is not None:
