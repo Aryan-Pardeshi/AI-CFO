@@ -264,11 +264,12 @@ const Holdings = ({ profile, saveAndAdvance, goBack }) => {
   }
 
   const savedHoldingsCount = holdings.filter((h) => h.server_id).length + (fdServerId ? 1 : 0);
+  const brokerImportWarning = holdingsStatementMsg.startsWith('Saved holdings cannot be overwritten');
 
   return (
     <div>
       {formError && <div style={{ color: 'var(--error-color)', marginBottom: '1rem', fontSize: '0.875rem' }}>{formError}</div>}
-      <div style={{ marginBottom: '1.5rem' }}><StatementAutofillBox heading="Auto-fill from a broker statement (optional)" helperText="Choose a broker holdings CSV to fill these numbers locally." onFileSelected={handleHoldingsAutofill} fileLabel="Broker holdings CSV" inputId="onboarding-broker-holdings-csv" loading={holdingsStatementLoading || holdingsHydration !== 'ready'} message={holdingsStatementMsg} /></div>
+      <div style={{ marginBottom: '1.5rem' }}><StatementAutofillBox heading="Auto-fill from a broker statement (optional)" helperText="Choose a broker holdings CSV to fill these numbers locally." onFileSelected={handleHoldingsAutofill} fileLabel="Broker holdings CSV" inputId="onboarding-broker-holdings-csv" loading={holdingsStatementLoading || holdingsHydration !== 'ready'} message={holdingsStatementMsg} messageTone={brokerImportWarning ? 'warning' : 'neutral'} /></div>
       <div role="group" aria-label="How to add investments" style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input type="radio" name="holdings-entry-mode" checked={holdingsEntryMode === 'individual'} onChange={() => { markLocalChange(); setHoldingsEntryMode('individual'); }} />

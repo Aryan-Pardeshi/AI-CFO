@@ -91,7 +91,10 @@ describe('Holdings broker CSV import', () => {
 
     await upload(csvFile('Symbol,Name,Qty,Avg Cost\nRELIANCE,Reliance Industries,10,2800.50\n'));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/saved holdings cannot be overwritten/i);
+    const warning = await screen.findByRole('status');
+    expect(warning).toHaveTextContent(/saved holdings cannot be overwritten/i);
+    expect(warning).toHaveAttribute('data-tone', 'warning');
+    expect(warning).toHaveStyle({ color: 'var(--error-color)' });
     expect(screen.getAllByDisplayValue('TCS')).toHaveLength(2);
     expect(screen.queryByDisplayValue('RELIANCE')).not.toBeInTheDocument();
     expect(api.createHolding).not.toHaveBeenCalled();

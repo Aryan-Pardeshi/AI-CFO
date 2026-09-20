@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from '../ui/Button';
 
-const StatementAutofillBox = ({ heading, helperText, onClick, onFileSelected, message, loading = false, fileLabel = 'CSV statement', inputId = 'onboarding-statement-csv' }) => (
+const StatementAutofillBox = ({ heading, helperText, onClick, onFileSelected, message, messageTone = 'neutral', loading = false, fileLabel = 'CSV statement', inputId = 'onboarding-statement-csv' }) => (
   <div style={{ border: '1px solid var(--border-color)', padding: '1.5rem' }}>
     <h3 style={{ marginTop: 0 }}>{heading}</h3>
     <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{helperText}</p>
@@ -21,7 +21,7 @@ const StatementAutofillBox = ({ heading, helperText, onClick, onFileSelected, me
         />
       </div>
     ) : <Button onClick={onClick}>Auto-fill from statement</Button>}
-    {message && <div role="status" style={{ marginTop: '0.75rem', fontSize: '0.875rem' }}>{message}</div>}
+    {message && <div role="status" data-tone={messageTone} style={{ marginTop: '0.75rem', fontSize: '0.875rem', ...(messageTone === 'warning' ? { color: 'var(--error-color)' } : {}) }}>{message}</div>}
   </div>
 );
 
