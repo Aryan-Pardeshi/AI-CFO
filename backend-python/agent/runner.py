@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,11 @@ def _latest_turn_instruction(message: str) -> str:
     """Keep a fresh request from being eclipsed by a persisted assistant turn."""
 
     normalized = message.lower()
-    if any(term in normalized for term in ("update", "change", "edit", "set my", "create", "save my", "save this", "delete", "remove")):
+    edit_request = re.match(
+        r"^(?:please\s+)?(?:update|change|edit|set|create|save|delete|remove)\b",
+        normalized.strip(),
+    )
+    if edit_request and not normalized.rstrip().endswith("?"):
         return (
             "LATEST REQUEST ROUTING: This is an action request. Call the relevant "
             "propose_* tool to create a validated preview; never write to the database."

@@ -290,6 +290,29 @@ def test_cashflow_turn_has_an_explicit_live_tool_route():
     assert "not calculate_fire" in latest
 
 
+def test_read_question_containing_change_does_not_route_to_proposal():
+    from agent import runner as runner_mod
+
+    latest = runner_mod._strands_messages([], "How did my portfolio change?")[-1]["content"][0]["text"]
+    assert "propose_*" not in latest
+    assert "get_portfolio_analysis" in latest
+
+
+def test_spending_change_question_routes_to_cashflow_read():
+    from agent import runner as runner_mod
+
+    latest = runner_mod._strands_messages([], "What changed in my spending?")[-1]["content"][0]["text"]
+    assert "propose_*" not in latest
+    assert "get_cashflow_summary" in latest
+
+
+def test_imperative_edit_still_routes_to_proposal():
+    from agent import runner as runner_mod
+
+    latest = runner_mod._strands_messages([], "Update my loan balance to 400000")[-1]["content"][0]["text"]
+    assert "propose_*" in latest
+
+
 def test_run_completes_even_if_publish_fails():
     from agent import runner as runner_mod
     from agent import tools as tools_mod

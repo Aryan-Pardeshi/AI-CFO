@@ -47,3 +47,13 @@ After implementation, the complete agent/finance suite is green:
 
 The contract allow-list now includes all newly shipped tools and retains only genuinely
 unshipped names as bans.
+
+## Fix round 2 TDD evidence
+
+Added routing regressions proving read questions containing “change” do not select proposal
+tools, while imperative edits still do. RED initially showed both read questions selecting
+the action branch. The classifier now requires an imperative edit verb at the start of the
+request (and rejects question-form input).
+
+Focused runner tests: `18 passed`.
+Full backend suite: `198 passed`.
