@@ -6,7 +6,7 @@ import { FiLogOut, FiUser, FiMoon, FiSun, FiMenu, FiX } from 'react-icons/fi';
 import './DashboardLayout.css';
 
 const DashboardLayout = () => {
-  const { logout, userEmail } = useAuth();
+  const { logout, userName } = useAuth();
   const { isDarkMode, toggleTheme } = useTheme();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -65,7 +65,7 @@ const DashboardLayout = () => {
             <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--accent-color)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <FiUser size={13} />
             </div>
-            <span style={{ fontWeight: 600 }}>{userEmail?.split('@')[0]}</span>
+            <span style={{ fontWeight: 600 }}>{userName || 'Account'}</span>
           </div>
           
           <button onClick={handleLogout} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.875rem', fontWeight: 500, padding: '0.5rem 0.75rem', borderRadius: '8px' }}>
@@ -129,7 +129,7 @@ const DashboardLayout = () => {
               <div style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: 'var(--accent-color)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <FiUser size={12} />
               </div>
-              <span style={{ fontWeight: 600 }}>{userEmail?.split('@')[0]}</span>
+              <span style={{ fontWeight: 600 }}>{userName || 'Account'}</span>
             </div>
             <button
               onClick={handleLogout}

@@ -67,6 +67,15 @@ export async function getCurrentAuthUser() {
   return getCurrentUser();
 }
 
+export async function getCurrentAuthUserAttributes() {
+  if (isMockOrQaSession()) {
+    const { mockGetCurrentUser } = await import('../mocks/auth-mock.js');
+    return (await mockGetCurrentUser()).attributes || {};
+  }
+  const { fetchUserAttributes } = await import('aws-amplify/auth');
+  return fetchUserAttributes();
+}
+
 export async function signInWithGoogleRedirect() {
   if (isMockOrQaSession()) {
     const { mockSignIn } = await import('../mocks/auth-mock.js');

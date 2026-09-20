@@ -11,6 +11,7 @@ describe('Cognito auth state', () => {
 
     await expect(resolveAuthState(async () => ({ username: 'cognito@example.com' }))).resolves.toEqual({
       userEmail: 'cognito@example.com',
+      userName: 'cognito',
       isAuthenticated: true,
     });
   });
@@ -20,7 +21,19 @@ describe('Cognito auth state', () => {
       throw new Error('No current user');
     })).resolves.toEqual({
       userEmail: null,
+      userName: null,
       isAuthenticated: false,
+    });
+  });
+
+  test('uses the Cognito name attribute instead of an internal Google username', async () => {
+    await expect(resolveAuthState(
+      async () => ({ username: 'Google_106292580408282642447' }),
+      async () => ({ name: 'Aryan Pardeshi', email: 'aryan@example.com' }),
+    )).resolves.toEqual({
+      userEmail: 'aryan@example.com',
+      userName: 'Aryan Pardeshi',
+      isAuthenticated: true,
     });
   });
 
