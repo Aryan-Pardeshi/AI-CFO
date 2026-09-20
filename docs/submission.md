@@ -90,6 +90,13 @@ tools used. Also becomes the basis for the AWS Builder Center blog (top-5-blogs 
 
 <!-- Per-person, one or two honest lines each. This counts toward the score. -->
 
+## Credits
+
+- **Aviral Mishra** — the product UI across the landing, authentication, onboarding, dashboard,
+  FIRE, investments/securities, milestones, balance-sheet, news and monthly-tracker experiences.
+- **Aryan Pardeshi** — ARIA's chat interface, tool-activity trace and change-review cards, plus
+  the financial engine, agent tools, integrations and backend wiring.
+
 ## AI coding tools used (must disclose)
 
 <!-- Claude Code / Codex / Gemini CLI — list what each person actually used. -->

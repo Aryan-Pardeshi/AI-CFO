@@ -112,6 +112,40 @@ def get_chat_job_route(user_id: str, job_id: str) -> dict:
         out["error"] = SAFE_CHAT_ERROR
     if item.get("tool_calls") is not None:
         out["tool_calls"] = item["tool_calls"]
+    try:
+        from agent import tools as tools_mod
+        out["tool_activity"] = []
+        for activity in item.get("tool_activity") or []:
+            if not isinstance(activity, dict):
+                raise ValueError("invalid tool activity")
+            validated = tools_mod.record_activity(activity.get("tool"), activity.get("status"))
+            if validated != activity:
+                raise ValueError("invalid tool activity shape")
+            out["tool_activity"].append(validated)
+        out["citations"] = []
+        for citation in item.get("citations") or []:
+            if not isinstance(citation, dict):
+                raise ValueError("invalid citation")
+            validated = tools_mod.record_citation(
+                citation.get("source"), citation.get("as_of"), citation.get("title"),
+                domain=citation.get("domain"), url=citation.get("url"),
+                citation_id=citation.get("id"),
+            )
+            if validated != citation:
+                raise ValueError("invalid citation shape")
+            out["citations"].append(validated)
+        out["proposed_actions"] = []
+        for proposal in item.get("proposed_actions") or []:
+            if not isinstance(proposal, dict):
+                raise ValueError("invalid proposal")
+            validated = tools_mod.validate_stored_action(proposal.get("entity"), proposal.get("operation"),
+                                                         target=proposal.get("target"), payload=proposal.get("payload"),
+                                                         expires_at=proposal.get("expires_at"))
+            if validated != proposal:
+                raise ValueError("invalid proposal shape")
+            out["proposed_actions"].append(validated)
+    except (TypeError, ValueError, KeyError):
+        return _err("INTERNAL", "chat metadata is unavailable", 500)
     return _ok(out)
 
 

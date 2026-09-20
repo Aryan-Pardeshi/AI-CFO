@@ -3,7 +3,7 @@ import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
 import { errStyle, inputStyle } from '../../components/onboarding/styles.js';
 import {
-  buildLoanPayload, fractionToPercent, loanRowSync, LOAN_TYPE_LABELS, paiseToRupees, parseRupeesField, percentToFraction, RATE_TYPE_LABELS, serverIdOf,
+  buildLoanPayload, fractionToPercent, loanRowSync, LOAN_TYPE_LABELS, paiseToRupees, parseRupeesField, percentToFraction, RATE_TYPE_LABELS, serverIdOf, validateCardFields,
 } from '../../lib/onboarding.js';
 import { createLoan, deleteLoan, listLoans, updateLoan } from '../../lib/api.js';
 
@@ -33,6 +33,9 @@ const Loans = ({ saveAndAdvance, goBack }) => {
             tenure_months: l.tenure_months === null || l.tenure_months === undefined ? '' : String(l.tenure_months),
             start_date: l.start_date ?? '',
             rate_type: l.rate_type ?? 'FIXED',
+            issuer: l.issuer ?? '',
+            credit_limit: paiseToRupees(l.credit_limit_paise),
+            payment_due_day: l.payment_due_day === null || l.payment_due_day === undefined ? '' : String(l.payment_due_day),
           })));
         }
       })
@@ -48,6 +51,7 @@ const Loans = ({ saveAndAdvance, goBack }) => {
     setLoans((prev) => [...prev, {
       id, loan_type: 'HOME', name: '', principal: '', outstanding: '',
       annual_rate: '', tenure_months: '', start_date: '', rate_type: 'FIXED', server_id: null,
+      issuer: '', credit_limit: '', payment_due_day: '',
     }]);
   }
 
@@ -100,8 +104,29 @@ const Loans = ({ saveAndAdvance, goBack }) => {
         next[`loan_${l.id}_tenure`] = 'Tenure must be 1–480 months';
       }
       if (!l.start_date) next[`loan_${l.id}_start`] = 'Start date is required';
-      if (!next[`loan_${l.id}_name`] && !next[`loan_${l.id}_principal`] && !next[`loan_${l.id}_outstanding`] && !next[`loan_${l.id}_rate`] && !next[`loan_${l.id}_tenure`] && !next[`loan_${l.id}_start`]) {
-        toSave.push({ row: l, principal: pr.paise, outstanding: out.paise, rate: percentToFraction(rate), tenure });
+      const cardErrors = validateCardFields({
+        loanType: l.loan_type,
+        issuer: l.issuer,
+        creditLimit: l.credit_limit,
+        paymentDueDay: l.payment_due_day,
+      });
+      let cardLimitPaise;
+      let cardDueDay;
+      if (l.loan_type === 'CREDIT_CARD') {
+        if (cardErrors.issuer) next[`loan_${l.id}_issuer`] = cardErrors.issuer;
+        if (cardErrors.credit_limit) next[`loan_${l.id}_credit_limit`] = cardErrors.credit_limit;
+        if (cardErrors.payment_due_day) next[`loan_${l.id}_payment_due_day`] = cardErrors.payment_due_day;
+        if (String(l.credit_limit ?? '').trim() !== '' && !cardErrors.credit_limit) {
+          const parsed = parseRupeesField('Credit limit', l.credit_limit);
+          if (parsed.error) next[`loan_${l.id}_credit_limit`] = parsed.error;
+          else cardLimitPaise = parsed.paise;
+        }
+        if (String(l.payment_due_day ?? '').trim() !== '' && !cardErrors.payment_due_day) {
+          cardDueDay = Number(String(l.payment_due_day).trim());
+        }
+      }
+      if (!next[`loan_${l.id}_name`] && !next[`loan_${l.id}_principal`] && !next[`loan_${l.id}_outstanding`] && !next[`loan_${l.id}_rate`] && !next[`loan_${l.id}_tenure`] && !next[`loan_${l.id}_start`] && !next[`loan_${l.id}_issuer`] && !next[`loan_${l.id}_credit_limit`] && !next[`loan_${l.id}_payment_due_day`]) {
+        toSave.push({ row: l, principal: pr.paise, outstanding: out.paise, rate: percentToFraction(rate), tenure, cardLimitPaise, cardDueDay });
       }
     }
     if (Object.keys(next).length > 0) {
@@ -111,7 +136,8 @@ const Loans = ({ saveAndAdvance, goBack }) => {
     setSaving(true);
     setFormError('');
     try {
-      for (const { row, principal, outstanding, rate, tenure } of toSave) {
+      for (const { row, principal, outstanding, rate, tenure, cardLimitPaise, cardDueDay } of toSave) {
+        const issuer = row.loan_type === 'CREDIT_CARD' ? String(row.issuer ?? '').trim() : undefined;
         const payload = buildLoanPayload({
           loanType: row.loan_type,
           name: row.name.trim(),
@@ -121,6 +147,9 @@ const Loans = ({ saveAndAdvance, goBack }) => {
           tenureMonths: tenure,
           startDate: row.start_date,
           rateType: row.rate_type,
+          issuer: row.loan_type === 'CREDIT_CARD' && issuer !== '' ? issuer : undefined,
+          creditLimitPaise: row.loan_type === 'CREDIT_CARD' ? cardLimitPaise : undefined,
+          paymentDueDay: row.loan_type === 'CREDIT_CARD' ? cardDueDay : undefined,
         });
         if (row.server_id) {
           await updateLoan(row.server_id, payload);
@@ -184,7 +213,28 @@ const Loans = ({ saveAndAdvance, goBack }) => {
           <div>
             <Input label="Tenure (months)" id={`loan-tenure-${l.id}`} value={l.tenure_months} onChange={(e) => editLoan(l.id, 'tenure_months', e.target.value)} placeholder="240" />
             {errors[`loan_${l.id}_tenure`] && <div style={errStyle}>{errors[`loan_${l.id}_tenure`]}</div>}
+            {l.loan_type === 'CREDIT_CARD' && l.issuer && (
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                Card: {l.issuer}{l.credit_limit ? ` · limit ₹${l.credit_limit}` : ''}{l.payment_due_day ? ` · due day ${l.payment_due_day}` : ''}
+              </div>
+            )}
           </div>
+          {l.loan_type === 'CREDIT_CARD' && (
+            <>
+              <div>
+                <Input label="Card issuer (optional)" id={`loan-issuer-${l.id}`} value={l.issuer ?? ''} onChange={(e) => editLoan(l.id, 'issuer', e.target.value)} placeholder="HDFC Regalia" />
+                {errors[`loan_${l.id}_issuer`] && <div style={errStyle}>{errors[`loan_${l.id}_issuer`]}</div>}
+              </div>
+              <div>
+                <Input label="Credit limit ₹ (optional)" id={`loan-limit-${l.id}`} value={l.credit_limit ?? ''} onChange={(e) => editLoan(l.id, 'credit_limit', e.target.value)} placeholder="300000" />
+                {errors[`loan_${l.id}_credit_limit`] && <div style={errStyle}>{errors[`loan_${l.id}_credit_limit`]}</div>}
+              </div>
+              <div>
+                <Input label="Due day 1–31 (optional)" id={`loan-due-${l.id}`} value={l.payment_due_day ?? ''} onChange={(e) => editLoan(l.id, 'payment_due_day', e.target.value)} placeholder="5" />
+                {errors[`loan_${l.id}_payment_due_day`] && <div style={errStyle}>{errors[`loan_${l.id}_payment_due_day`]}</div>}
+              </div>
+            </>
+          )}
           <div>
             <button type="button" onClick={() => removeLoanRow(l.id)} style={{ ...inputStyle, width: 'auto', cursor: 'pointer' }}>Remove loan</button>
           </div>

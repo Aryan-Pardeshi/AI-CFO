@@ -24,6 +24,14 @@ Upstox market data · Firecrawl web search.
 
 In progress — hackathon build, 17-20 Sept 2026.
 
+## Credits
+
+- **Aviral Mishra** — product UI across the landing, authentication, onboarding, dashboard,
+  FIRE, portfolio/investments, securities, milestones, balance-sheet, news and monthly-tracker
+  experiences.
+- **Aryan Pardeshi** — ARIA's chat interface and activity/action-review UI, plus the financial
+  engine, agent tools, integrations and backend wiring.
+
 ## License
 
 See [LICENSE](LICENSE).

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import uuid
@@ -67,6 +68,7 @@ ROUTES: list[tuple[str, str]] = [
     ("POST", r"/fire/goal-impact"),
     ("GET", r"/fire/scenarios"),
     ("POST", r"/fire/scenarios"),
+    ("PATCH", r"/transactions/[^/]+/category"),
     ("GET", r"/net-worth"),
     ("GET", r"/net-worth/projection"),
     ("POST", r"/loans/emi"),
@@ -94,6 +96,8 @@ LIVE_ROUTES = {
     ("GET", "/net-worth"),
     ("GET", "/net-worth/projection"),
     ("POST", "/chat"),
+    ("POST", "/fire/scenarios"),
+    ("PATCH", "/transactions/[^/]+/category"),
 }
 
 TXN_CATEGORIES = {
@@ -101,6 +105,57 @@ TXN_CATEGORIES = {
     "SHOPPING", "UTILITIES", "SUBSCRIPTIONS", "EMI", "INVESTMENTS", "TRANSFER",
     "HEALTH", "EDUCATION", "ENTERTAINMENT", "OTHER",
 }
+
+FIRE_SCENARIO_FIELDS = {
+    "target_age": (int, 18, 120),
+    "current_age": (int, 18, 100),
+    "monthly_expenses_paise": (int, 0, 10_000_000_000_000),
+    "monthly_investment_paise": (int, 0, 10_000_000_000_000),
+    "current_corpus_paise": (int, 0, 100_000_000_000_000_000),
+    "goals": (list, 0, 50),
+    "loans": (list, 0, 50),
+    "inflation": (float, 0.0, 1.0),
+    "step_up": (float, 0.0, 1.0),
+    "return_before_40": (float, -1.0, 2.0),
+    "return_40_to_60": (float, -1.0, 2.0),
+    "return_after_60": (float, -1.0, 2.0),
+    "post_fire_return": (float, -1.0, 2.0),
+    "lifespan_age": (int, 40, 120),
+}
+
+
+def _validate_fire_scenario_inputs(inputs: object) -> dict | None:
+    """Validate the persisted FIRE override schema; never accept arbitrary dicts."""
+    if not isinstance(inputs, dict) or not inputs:
+        return None
+    if any(key not in FIRE_SCENARIO_FIELDS for key in inputs):
+        return None
+    for key, value in inputs.items():
+        expected, minimum, maximum = FIRE_SCENARIO_FIELDS[key]
+        if key in {"goals", "loans"}:
+            if not isinstance(value, list) or len(value) > maximum:
+                return None
+            allowed = ({"goal_type", "amount_today_paise", "target_age", "inflation_rate"}
+                       if key == "goals" else {"annual_emi_paise", "end_age"})
+            for item in value:
+                if not isinstance(item, dict) or any(field not in allowed for field in item):
+                    return None
+                for field, number in item.items():
+                    if isinstance(number, bool) or field in {"goal_type"}:
+                        if field == "goal_type" and isinstance(number, str) and number.strip():
+                            continue
+                        return None
+                    if not isinstance(number, (int, float)) or number < 0:
+                        return None
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        if expected is int and not isinstance(value, int):
+            return None
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < minimum or numeric > maximum:
+            return None
+    return dict(inputs)
 
 
 # ---------- response helpers (api-contract.md error envelope) ----------
@@ -275,6 +330,73 @@ def _transactions_table():
     return _table("TRANSACTIONS_TABLE")
 
 
+def _fire_scenarios_table():
+    return _table("FIRE_SCENARIOS_TABLE")
+
+
+def create_fire_scenario_route(user_id: str, body: dict) -> dict:
+    name = body.get("name")
+    inputs = body.get("inputs")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
+        return _validation("name is required and must be at most 120 characters")
+    inputs = _validate_fire_scenario_inputs(inputs)
+    if inputs is None:
+        return _validation("inputs contain an unknown field or invalid value")
+    now = datetime.now(timezone.utc).isoformat()
+    scenario = {
+        "user_id": user_id,
+        "scenario_id": str(uuid.uuid4()),
+        "name": name.strip(),
+        "inputs": inputs,
+        "created_at": now,
+        "updated_at": now,
+        "version": 1,
+    }
+    _fire_scenarios_table().put_item(Item=scenario)
+    return _ok({"scenario": scenario}, 201)
+
+
+def update_transaction_category_route(user_id: str, txn_id: str, body: dict) -> dict:
+    category = body.get("category")
+    version = body.get("version")
+    if not isinstance(category, str) or category not in TXN_CATEGORIES:
+        return _validation("category is invalid")
+    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+        return _validation("version is required")
+    table = _transactions_table()
+    rows = table.query(KeyConditionExpression=Key("user_id").eq(user_id)).get("Items", [])
+    row = next((candidate for candidate in rows if candidate.get("txn_id") == txn_id
+                or str(candidate.get("txn_sk", "")).endswith(f"#{txn_id}")), None)
+    if not row:
+        return _not_found("Transaction not found")
+    if int(row.get("version") or 1) != version:
+        return _conflict("Transaction changed; refresh and try again")
+    now = datetime.now(timezone.utc).isoformat()
+    key = {"user_id": user_id, "txn_sk": row.get("txn_sk") or row.get("txn_id")}
+    try:
+        result = table.update_item(
+            Key=key,
+            UpdateExpression="SET category = :category, category_source = :source, #version = :next_version, updated_at = :updated_at",
+            ConditionExpression="#version = :expected_version",
+            ExpressionAttributeNames={"#version": "version"},
+            ExpressionAttributeValues={
+                ":category": category,
+                ":source": "user",
+                ":expected_version": version,
+                ":next_version": version + 1,
+                ":updated_at": now,
+            },
+            ReturnValues="ALL_NEW",
+        )
+    except Exception as exc:
+        if getattr(exc, "response", {}).get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return _conflict("Transaction changed; refresh and try again")
+        raise
+    updated = result.get("Attributes") or {**row, "category": category, "category_source": "user",
+                                            "version": version + 1, "updated_at": now}
+    return _ok({"transaction": updated})
+
+
 def _query_table(table_env_var: str, user_id: str) -> list[dict]:
     table_name = os.environ.get(table_env_var)
     if not table_name:
@@ -323,6 +445,7 @@ def load_user_data(user_id: str) -> dict:
         "holdings": _query_table("HOLDINGS_TABLE", user_id),
         "goals": _query_table("GOALS_TABLE", user_id),
         "loans": _query_table("LOANS_TABLE", user_id),
+        "transactions": _query_table("TRANSACTIONS_TABLE", user_id),
     })
 
 
@@ -1198,7 +1321,9 @@ def handler(event: dict, context) -> dict:
         method == "POST" and path == "/statements"
     ) or re.fullmatch(r"(?:POST|GET) /statements/[^/]+(?:/process|/commit)?", f"{method} {path}")
     cashflow_live = method == "GET" and path == "/cashflow/summary"
-    if (method, path) not in LIVE_ROUTES and not statements_live and not cashflow_live:
+    category_live = method == "PATCH" and re.fullmatch(r"/transactions/[^/]+/category", path)
+    scenario_live = method == "POST" and path == "/fire/scenarios"
+    if (method, path) not in LIVE_ROUTES and not statements_live and not cashflow_live and not category_live and not scenario_live:
         return not_implemented_response(route_label)
 
     try:
@@ -1222,6 +1347,11 @@ def handler(event: dict, context) -> dict:
             return cashflow_summary_route(user_id)
         if method == "POST" and path == "/chat":
             return post_chat_route(user_id, body)
+        if method == "POST" and path == "/fire/scenarios":
+            return create_fire_scenario_route(user_id, body)
+        category_match = re.fullmatch(r"/transactions/([^/]+)/category", path)
+        if method == "PATCH" and category_match:
+            return update_transaction_category_route(user_id, category_match.group(1), body)
         data = load_user_data(user_id)
         if (method, path) == ("GET", "/portfolio/analysis"):
             return portfolio_analysis_route(data)

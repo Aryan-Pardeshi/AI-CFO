@@ -65,6 +65,30 @@ export function createGoalPayload({
   };
 }
 
+export function contributionDeltaPaise(currentSavedPaise, contributionRupees) {
+  // Type check BEFORE any Number() coercion: Number(null) === 0, Number('') === 0,
+  // Number([]) === 0, Number(true) === 1 — coercing here would make a goal with a
+  // missing current_saved_paise indistinguishable from a real zero-saved goal. The
+  // canonical API returns JSON numbers, so a genuine `number` is the only trustworthy shape.
+  if (
+    typeof currentSavedPaise !== 'number' ||
+    !Number.isSafeInteger(currentSavedPaise) ||
+    currentSavedPaise < 0
+  ) {
+    throw new Error('Current saved amount is unavailable; refresh and try again.');
+  }
+  const current = currentSavedPaise;
+  const delta = rupeesToPaise(contributionRupees);
+  if (!Number.isSafeInteger(delta) || delta <= 0) {
+    throw new Error('Contribution must be a positive amount with up to 2 decimals');
+  }
+  const next = current + delta;
+  if (!Number.isSafeInteger(next)) {
+    throw new Error('Contribution would exceed the maximum supported amount');
+  }
+  return { deltaPaise: delta, nextSavedPaise: next };
+}
+
 export function mapGoalToMilestone(goal) {
   const targetPaise = Number(goal?.amount_today_paise);
   const savedPaise = Number(goal?.current_saved_paise);

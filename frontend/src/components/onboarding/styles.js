@@ -4,4 +4,6 @@ export const inputStyle = {
   fontSize: '0.875rem',
 };
 
+export const nativeSelectOptionStyle = { backgroundColor: '#FFFFFF', color: '#1C1917' };
+
 export const errStyle = { color: 'var(--error-color)', fontSize: '0.8rem', marginTop: '0.25rem' };

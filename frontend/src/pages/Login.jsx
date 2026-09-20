@@ -4,6 +4,7 @@ import { Hub } from 'aws-amplify/utils';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import GoogleIcon from '../components/GoogleIcon';
+import LoadingScreen from '../components/ui/LoadingScreen';
 import { getMe } from '../lib/api.js';
 import { getCurrentAuthUser, signInUser, signInWithGoogleRedirect } from '../lib/auth.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -16,6 +17,8 @@ const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD;
 const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [resolveStage, setResolveStage] = useState('');
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -33,28 +36,26 @@ const Login = () => {
   }, []);
 
   async function afterAuth(isDemo = false) {
+    setResolving(true);
     try {
+      setResolveStage('Verifying your session…');
       await login();
-      if (isDemo) {
-        navigate('/overview', { replace: true });
-        return;
-      }
+      setResolveStage('Loading your profile…');
       const profile = await getMe();
-      if (profile && typeof profile.onboarding_step === 'number') {
-        navigate(profile.onboarded ? '/overview' : '/onboarding', { replace: true });
-      } else if (!profile || profile.onboarded === false) {
-        navigate('/onboarding', { replace: true });
-      } else {
-        navigate('/overview', { replace: true });
-      }
+      navigate(profile?.onboarded ? '/overview' : '/onboarding', { replace: true });
     } catch (err) {
+      // Demo accounts remain usable in local QA even when the optional profile
+      // endpoint is unavailable; normal accounts get an honest error state.
       if (isDemo) {
         navigate('/overview', { replace: true });
       } else if (err && (err.status === 404 || err.code === 'NOT_FOUND')) {
         navigate('/onboarding', { replace: true });
       } else {
-        navigate('/overview', { replace: true });
+        setError(err?.message || 'Could not load your profile. Please try again.');
       }
+    } finally {
+      setResolving(false);
+      setResolveStage('');
     }
   }
 
@@ -131,7 +132,9 @@ const Login = () => {
   };
 
   return (
-    <div style={{
+    <>
+      {resolving && <LoadingScreen message="Signing you in…" stage={resolveStage} />}
+      <div style={{
       width: '100%',
       maxWidth: '400px',
       background: 'var(--surface-color)',
@@ -180,7 +183,8 @@ const Login = () => {
           Create one
         </Link>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

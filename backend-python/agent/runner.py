@@ -9,11 +9,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
+from types import SimpleNamespace
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SAFE_CHAT_ERROR = "Unable to complete this chat right now. Please try again."
+_CITATION_FIELDS = frozenset({"id", "source", "as_of", "title", "domain", "url"})
 KILO_PROVIDER_ERROR_NAMES = frozenset({
     "APIError",
     "APIConnectionError",
@@ -44,7 +47,7 @@ def _default_agent_factory(*, model_id: str | None = None):
         # the Lambda layer, not a pip dependency). Any *other* failure, like a
         # bad tool schema or a missing secret, must propagate so the chat job
         # is marked FAILED instead of returning a plausible canned answer.
-        registry = tools_mod.get_tool_registry()
+        registry = tools_mod.get_tool_registry(include_external=True, discover=True)
 
         class _FallbackResult:
             def __init__(self, text, tools_used):
@@ -66,7 +69,7 @@ def _default_agent_factory(*, model_id: str | None = None):
         agent._tool_registry = registry
         return agent
 
-    tools = list(tools_mod.get_tool_registry().values())
+    tools = list(tools_mod.get_tool_registry(include_external=True, discover=True).values())
     return Agent(model=model, system_prompt=prompt_mod.SYSTEM_PROMPT, tools=tools)
 
 
@@ -97,6 +100,133 @@ def _fallback_agent_factories(deps: dict, uses_default_agent: bool):
     ]
 
 
+def _latest_turn_instruction(message: str) -> str:
+    """Keep a fresh request from being eclipsed by a persisted assistant turn."""
+
+    normalized = message.lower()
+    # "Update me ..." asks for status, including "on", "about", and "regarding".
+    edit_verb = r"(?:update(?!\s+me\b)|change|edit|set|create|save|delete|remove)\b"
+    edit_request = re.match(
+        r"^(?:please\s+)?" + edit_verb,
+        normalized.strip(),
+    )
+    conversational_edit = re.match(
+        r"^(?:can you|could you|would you|i want to|i'd like to)\s+(?:please\s+)?"
+        + edit_verb,
+        normalized.strip(),
+    )
+    if (edit_request and not normalized.rstrip().endswith("?")) or conversational_edit:
+        return (
+            "LATEST REQUEST ROUTING: This is an action request. Call the relevant "
+            "propose_* tool to create a validated preview; never write to the database."
+        )
+    if any(term in normalized for term in ("security", "stock", "etf", "mutual fund", "isin", "ticker")):
+        return (
+            "LATEST REQUEST ROUTING: This is a security request. Call the relevant backed "
+            "portfolio/security tool before answering; never invent market data."
+        )
+    if any(term in normalized for term in ("tax", "income tax", "capital gain", "capital gains")):
+        return (
+            "LATEST REQUEST ROUTING: This is a tax estimate request. Call "
+            "estimate_income_tax, compare_tax_regimes, or estimate_capital_gains_tax "
+            "as appropriate before answering."
+        )
+    if any(term in normalized for term in ("insurance", "term cover", "health cover")):
+        return (
+            "LATEST REQUEST ROUTING: This is an insurance estimate request. Call "
+            "estimate_insurance_needs before answering."
+        )
+    if any(term in normalized for term in ("emi", "loan", "prepayment", "credit card")):
+        return (
+            "LATEST REQUEST ROUTING: This is a loan or debt-calculator request. Call "
+            "calculate_emi, calculate_prepayment_impact, or calculate_credit_card_payoff "
+            "as appropriate before answering."
+        )
+    if any(term in normalized for term in ("short term", "short-term", "horizon")):
+        return (
+            "LATEST REQUEST ROUTING: This is a short-term fit request. Call "
+            "analyze_short_term_fit before answering; do not give a buy or sell signal."
+        )
+    if any(term in normalized for term in (
+        "cashflow", "cash flow", "transaction", "transactions", "spending",
+        "spend", "income", "expenses", "expense",
+    )):
+        return (
+            "LATEST REQUEST ROUTING: This is a cashflow request. Call "
+            "get_cashflow_summary before answering. Do not calculate_fire or "
+            "reuse a prior FIRE answer for this request."
+        )
+    if "fire" in normalized or "financial independence" in normalized:
+        return (
+            "LATEST REQUEST ROUTING: This is a FIRE request. Call "
+            "calculate_fire before answering, unless the user explicitly asks "
+            "only about a prior answer."
+        )
+    if any(term in normalized for term in ("portfolio", "concentrat", "allocation")):
+        return (
+            "LATEST REQUEST ROUTING: This is a portfolio request. Call "
+            "get_portfolio_analysis before answering."
+        )
+    if "net worth" in normalized or "networth" in normalized:
+        return (
+            "LATEST REQUEST ROUTING: This is a net-worth request. Call "
+            "get_net_worth before answering."
+        )
+    return "LATEST REQUEST: Answer this new request; do not repeat a prior answer."
+
+
+def _strands_messages(history: list[dict], message: str) -> list[dict]:
+    """Build the documented Strands message-list input for one persisted turn."""
+
+    messages = []
+    for row in history:
+        role = row.get("role") if isinstance(row, dict) else None
+        content = row.get("content") if isinstance(row, dict) else None
+        if role in {"user", "assistant"} and isinstance(content, str) and content:
+            messages.append({"role": role, "content": [{"text": content}]})
+    messages.append({
+        "role": "user",
+        "content": [{"text": f"{message}\n\n{_latest_turn_instruction(message)}"}],
+    })
+    return messages
+
+
+MAX_USER_URLS = 8  # matches the per-job Firecrawl read budget
+
+
+def _trusted_user_urls(message: str) -> tuple[str, ...]:
+    """Extract only normalized HTTP(S) URLs from the authenticated user turn.
+
+    The current user message is the only trusted text source: history, tool
+    output, and model text never populate this allowlist. normalize_url drops
+    credentials, control/hidden characters, whitespace, and malformed hosts.
+    """
+    from agent.research_safety import normalize_url
+
+    found: list[str] = []
+    for candidate in re.findall(r"https?://[^\s<>\"']+", message or "", flags=re.I):
+        candidate = candidate.rstrip(".,;:!?)]}\"")
+        try:
+            normalized = normalize_url(candidate)
+        except ValueError:
+            continue
+        if normalized not in found:
+            found.append(normalized)
+        if len(found) >= MAX_USER_URLS:
+            break
+    return tuple(found)
+
+
+def _job_firecrawl_client(deps):
+    client = deps.get("firecrawl_client")
+    if client is not None:
+        return client
+    if not os.environ.get("FIRECRAWL_API_KEY"):
+        return None
+    from integrations.firecrawl import FirecrawlClient
+    return FirecrawlClient(http=__import__("requests"), api_key=os.environ["FIRECRAWL_API_KEY"])
+
+
 def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
     """Execute one chat job. Test doubles go through `deps`; never live model in tests."""
     from agent import prompt as prompt_mod
@@ -115,8 +245,16 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
     channel = channel_for(user_id, job_id)
     jobs_table = None
     publisher = deps.get("publisher") or publish_job_event
+    metadata = {"tool_activity": [], "citations": [], "proposed_actions": []}
+    jobs_table_for_progress = None
+
+    def persist_progress():
+        if jobs_table_for_progress is not None:
+            store_mod.update_chat_job(jobs_table_for_progress, user_id, job_id, "RUNNING",
+                                      conversation_id=conversation_id, **metadata)
     try:
         jobs_table = deps.get("jobs_table") or store_mod.get_chat_jobs_table()
+        jobs_table_for_progress = jobs_table
         conv_table = deps.get("conv_table") or store_mod.get_conversations_table()
         tracker = deps.get("tracker") or tools_mod.ToolCallTracker(cap=tools_mod.TOOL_CAP)
         store_mod.update_chat_job(jobs_table, user_id, job_id, "RUNNING",
@@ -126,6 +264,16 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
                    for r in history_rows]
         store_mod.save_message(conv_table, user_id, conversation_id, "user", message)
         start_ms = __import__("time").monotonic()
+        invocation_state = {
+            "user_id": user_id, "tracker": tracker, "history": history,
+            "metadata": metadata, "message": message,
+            "user_urls": _trusted_user_urls(message),
+        }
+        firecrawl_client = _job_firecrawl_client(deps)
+        if firecrawl_client is not None:
+            # One client owns one ResearchGuard for the whole job. This keeps
+            # search/read caps and same-job result IDs intact across calls.
+            invocation_state["firecrawl_client"] = firecrawl_client
         agent = deps.get("agent")
         uses_default_agent = agent is None and "agent_factory" not in deps
         if agent is None:
@@ -134,7 +282,8 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
 
         try:
             answer, tools_used = _invoke(agent, message, history, user_id, tracker,
-                                         channel, publisher, deps)
+                                         channel, publisher, deps, metadata, persist_progress,
+                                         invocation_state)
         except Exception as exc:
             if not _is_kilo_provider_error(exc):
                 raise
@@ -151,7 +300,8 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
                 try:
                     fallback_agent = fallback_factory()
                     answer, tools_used = _invoke(
-                        fallback_agent, message, history, user_id, tracker, channel, publisher, deps
+                        fallback_agent, message, history, user_id, tracker, channel, publisher, deps,
+                        metadata, persist_progress, invocation_state
                     )
                     break
                 except Exception as fallback_exc:
@@ -164,8 +314,8 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
         store_mod.save_message(conv_table, user_id, conversation_id, "assistant",
                                answer, tools_used=tools_used)
         job = store_mod.update_chat_job(jobs_table, user_id, job_id, "COMPLETED",
-                                        conversation_id=conversation_id,
-                                        answer=answer, tool_calls=tools_used)
+                                        conversation_id=conversation_id, answer=answer,
+                                        tool_calls=tools_used, **metadata)
         try:
             publisher(channel, "done", {"job_id": job_id})
         except Exception:
@@ -184,35 +334,75 @@ def run_chat_job(payload: dict, deps: dict | None = None) -> dict:
         if jobs_table is None:
             return {"user_id": user_id, "job_id": job_id,
                     "conversation_id": conversation_id, "status": "FAILED",
-                    "error": SAFE_CHAT_ERROR}
+                    "error": SAFE_CHAT_ERROR, **metadata}
         try:
             return store_mod.update_chat_job(jobs_table, user_id, job_id, "FAILED",
                                              conversation_id=conversation_id,
-                                             error=SAFE_CHAT_ERROR)
+                                             error=SAFE_CHAT_ERROR, **metadata)
         except Exception as mark_exc:
             logger.info({"event": "chat_job_failure_unpersisted",
                          "user_hash": _user_hash(user_id),
                          "error_class": type(mark_exc).__name__})
             return {"user_id": user_id, "job_id": job_id,
                     "conversation_id": conversation_id, "status": "FAILED",
-                    "error": SAFE_CHAT_ERROR}
+                    "error": SAFE_CHAT_ERROR, **metadata}
 
 
-def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps):
+def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps,
+            metadata=None, persist_progress=None, invocation_state=None):
     """Run the agent with deterministic cap + progress events. Returns (answer, tools_used)."""
     tools_used: list[str] = []
+    metadata = metadata if metadata is not None else {"tool_activity": [], "citations": [], "proposed_actions": []}
+    invocation_state = invocation_state or {
+        "user_id": user_id, "tracker": tracker, "history": history,
+        "metadata": metadata, "message": message, "user_urls": _trusted_user_urls(message),
+    }
+    from agent import tools as tools_mod
 
     def _note_tool(name: str, phase: str):
-        tools_used.append(name) if phase == "end" else None
+        status = "started" if phase == "start" else "completed"
+        activity = tools_mod.record_activity(name, status)
+        if activity not in metadata["tool_activity"]:
+            metadata["tool_activity"].append(activity)
         try:
-            publisher(channel, f"tool_{phase}", {"tool": name})
+            publisher(channel, f"tool_{phase}", activity)
         except Exception:
             pass
+        if persist_progress:
+            persist_progress()
+
+    def _save_citation(citation):
+        """Persist only validated citation metadata, never raw research output."""
+        if not isinstance(citation, dict) or set(citation) - _CITATION_FIELDS:
+            # Unknown keys mean a raw payload or identity field hitched a ride.
+            return
+        title = citation.get("title") or None
+        for attempt_title in ((title,) if title is None else (title, None)):
+            try:
+                item = tools_mod.record_citation(
+                    citation.get("source"),
+                    citation.get("as_of"),
+                    attempt_title,
+                    domain=citation.get("domain"),
+                    url=citation.get("url"),
+                    citation_id=citation.get("id"),
+                )
+            except (TypeError, ValueError):
+                # An untrusted page title that trips the sanitizer must not
+                # cost the user the citation itself; retry once without it.
+                continue
+            if item not in metadata["citations"]:
+                metadata["citations"].append(item)
+            return
 
     # Test-double / fallback path: no stream_async means a simple double.
     if not hasattr(agent, "stream_async"):
         result = agent.run(message, history=history, tracker=tracker)
-        return result.text, list(getattr(result, "tools_used", []))
+        used = list(getattr(result, "tools_used", []))
+        for name in used:
+            _note_tool(name, "start")
+            _note_tool(name, "end")
+        return result.text, used
 
     # Strands path: stream with invocation_state carrying verified identity.
     import asyncio
@@ -221,24 +411,87 @@ def _invoke(agent, message, history, user_id, tracker, channel, publisher, deps)
         nonlocal tools_used
         chunks: list[str] = []
         used: list[str] = []
+        started_tools: dict[str, str] = {}
+        finished_tools: set[str] = set()
+
+        def _tool_name(value) -> str | None:
+            if isinstance(value, dict):
+                value = value.get("name")
+            if not isinstance(value, str) or not value:
+                return None
+            return value
+
+        def _tool_key(value, name: str) -> str:
+            if isinstance(value, dict):
+                identifier = value.get("toolUseId") or value.get("tool_use_id")
+                if isinstance(identifier, str) and identifier:
+                    return identifier
+            return f"name:{name}"
+
+        def _start_tool(value) -> None:
+            name = _tool_name(value)
+            if name is None:
+                return
+            key = _tool_key(value, name)
+            if key not in started_tools:
+                started_tools[key] = name
+                _note_tool(name, "start")
+
+        def _finish_tool(value) -> None:
+            name = _tool_name(value)
+            if name is None:
+                return
+            key = _tool_key(value, name)
+            if key in started_tools and key not in finished_tools:
+                finished_tools.add(key)
+                _note_tool(started_tools[key], "end")
+                used.append(started_tools[key])
+
         try:
             stream = agent.stream_async(
-                message,
-                invocation_state={"user_id": user_id, "tracker": tracker,
-                                  "history": history},
+                _strands_messages(history, message),
+                invocation_state=invocation_state,
             )
         except TypeError:
-            stream = agent.stream_async(message)
+            stream = agent.stream_async(_strands_messages(history, message))
         async for event in stream:
             if isinstance(event, dict):
-                if event.get("tool_start"):
-                    name = str(event["tool_start"])
-                    _note_tool(name, "start")
-                if event.get("tool_end"):
-                    _note_tool(str(event["tool_end"]), "end")
-                    used.append(str(event["tool_end"]))
-                if event.get("text_delta"):
-                    chunks.append(str(event["text_delta"]))
+                # Standard Strands fields (``data`` and ``current_tool_use``),
+                # plus the legacy aliases used by our local doubles.
+                _start_tool(event.get("current_tool_use"))
+                _start_tool(event.get("tool_start"))
+                _finish_tool(event.get("tool_end"))
+                for citation in event.get("citations", []) if isinstance(event.get("citations"), list) else []:
+                    _save_citation(citation)
+                tool_result = event.get("tool_result")
+                if isinstance(tool_result, dict):
+                    explicit = tool_result.get("citations")
+                    if isinstance(explicit, list):
+                        for citation in explicit:
+                            _save_citation(citation)
+                    elif tool_result.get("source") and tool_result.get("as_of"):
+                        # Non-research tools expose only the compact source/as_of pair.
+                        _save_citation({"source": tool_result["source"], "as_of": tool_result["as_of"]})
+                action = event.get("proposed_action")
+                if isinstance(action, dict):
+                    try:
+                        item = tools_mod.propose_action(action.get("entity"), action.get("operation"),
+                                                        target=action.get("target"), payload=action.get("payload"),
+                                                        tool_context=SimpleNamespace(invocation_state={"message": message}))
+                        if item not in metadata["proposed_actions"]:
+                            metadata["proposed_actions"].append(item)
+                    except (TypeError, ValueError):
+                        pass
+                if persist_progress:
+                    persist_progress()
+                text = event.get("data")
+                if not isinstance(text, str):
+                    text = event.get("text_delta")
+                if isinstance(text, str):
+                    chunks.append(text)
+        for key, name in started_tools.items():
+            if key not in finished_tools:
+                _finish_tool({"toolUseId": key, "name": name})
         return "".join(chunks), used
 
     try:

@@ -9,6 +9,7 @@ import '@testing-library/jest-dom/vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import Advisory from './Advisory.jsx';
+import { getConversationMessages } from '../../lib/chatApi.js';
 
 vi.mock('../../lib/chatApi.js', () => ({
   SUGGESTED_PROMPTS: [
@@ -83,7 +84,7 @@ describe('Advisory chat UI (server-rendered markup)', () => {
     expect(html).toContain('advisory-page');
     expect(html).toContain('advisory-chat-area');
     expect(html).toContain('advisory-composer-container');
-    expect(html).toContain('ARIA Advisory');
+    expect(html).toContain('>ARIA</h2>');
     expect(html).toContain('private AI wealth intelligence');
     expect(html).toContain('Educational insights from your saved data. Not investment advice.');
     expect(html).not.toContain('border: 1px solid var(--border-color)');
@@ -149,5 +150,51 @@ describe('Advisory interactive chat UI', () => {
     // Messages should be cleared and empty state heading visible again
     expect(screen.queryByText('Analyze my portfolio allocation and diversification.')).not.toBeInTheDocument();
     expect(screen.getByText('How can ARIA help?')).toBeInTheDocument();
+  });
+
+  test('renders bold financial values from an assistant response', async () => {
+    getConversationMessages.mockResolvedValueOnce([
+      { role: 'assistant', content: 'Your total surplus is **₹3,43,539**.' },
+    ]);
+    render(React.createElement(Advisory));
+
+    await screen.findByRole('button', { name: 'New chat' });
+    fireEvent.change(screen.getByLabelText('Past chats'), { target: { value: 'conv-1' } });
+
+    const amount = await screen.findByText('₹3,43,539');
+    expect(amount.tagName).toBe('STRONG');
+  });
+
+  test('renders a Markdown table from an assistant response', async () => {
+    getConversationMessages.mockResolvedValueOnce([
+      {
+        role: 'assistant',
+        content: '| Month | Net surplus |\n| --- | ---: |\n| September | ₹1,13,299 |',
+      },
+    ]);
+    render(React.createElement(Advisory));
+
+    await screen.findByRole('button', { name: 'New chat' });
+    fireEvent.change(screen.getByLabelText('Past chats'), { target: { value: 'conv-1' } });
+
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Net surplus' })).toBeInTheDocument();
+  });
+
+  test('restores safe activity, citations, and future proposals from retained history', async () => {
+    getConversationMessages.mockResolvedValueOnce([{
+      role: 'assistant',
+      content: 'Saved answer',
+      tool_activity: [{ tool: 'get_net_worth', source: 'ARIA', status: 'completed', timestamp: '2026-09-20T00:00:00Z' }],
+      citations: [{ title: 'Unsafe', url: 'javascript:alert(1)', as_of: '2026-09-20' }],
+      proposed_actions: [{ entity: 'goal', operation: 'update', target: 'g1', payload: { name: 'Car' }, expires_at: '2099-01-01T00:00:00Z', summary: 'Update goal' }],
+    }]);
+    render(React.createElement(Advisory));
+    await screen.findByRole('button', { name: 'New chat' });
+    fireEvent.change(screen.getByLabelText('Past chats'), { target: { value: 'conv-1' } });
+    expect(await screen.findByText(/ARIA activity/)).toBeInTheDocument();
+    expect(screen.getByText('Saved answer')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Unsafe/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument();
   });
 });

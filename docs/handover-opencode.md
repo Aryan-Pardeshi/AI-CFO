@@ -9,6 +9,54 @@ There is no second Claude reviewing your output any more, so section 12 (verific
 
 ---
 
+## 0. Current status — updated 19 September 2026
+
+**This section overrides stale statements later in this document.** The original handover was written before
+the chat, FIRE, demo-data and Kilo work landed.
+
+- AWS stack: `aicfo-dev` in `ap-south-1`, updated successfully at **2026-09-19 15:35 UTC**. The update was
+  in-place only (no Cognito, DynamoDB, S3 or API replacement).
+- The demo user is seeded with a profile, seven holdings, two goals, four loans and **58 transactions across
+  six months**. The transaction loader now includes those rows in ARIA's financial snapshot, so cashflow is
+  no longer silently empty.
+- ARIA chat is live behind `POST /chat`, polling `GET /chat/{job_id}`, and persisted conversations. The runner
+  sends the last ten saved turns plus the current turn to each fresh Lambda agent; it does not rely on
+  Lambda process memory. Each newest turn also carries an explicit live-tool route (cashflow →
+  `get_cashflow_summary`, FIRE → `calculate_fire`, portfolio → `get_portfolio_analysis`, net worth →
+  `get_net_worth`) so an earlier answer cannot hijack a distinct new question.
+- ARIA’s frontend safely renders assistant Markdown: bold values, headings, lists and GitHub-style tables. Raw
+  HTML remains disabled; do not replace this with `dangerouslySetInnerHTML`.
+- Strands emits `data` and `current_tool_use` events. The runner now persists those standard events correctly;
+  the former code listened for non-existent `text_delta` / `tool_end` fields and replaced genuine answers with a
+  generic fallback.
+- Model routing is: **DeepSeek V4 Flash 0731 (free)** → **NVIDIA Nemotron 3 Super 120B (free)** →
+  **Kilo Auto (free)**. Fallback occurs only for an upstream Kilo-provider error, never for a data or tool error.
+  The key stays in Secrets Manager under `aicfo/kilo`; never copy it into source or an environment file.
+- Live smoke checks passed for the demo user: a snapshot chat completed with `get_financial_snapshot`; a follow-up
+  in the same conversation used `calculate_fire` and retained the prior FIRE age. After the routing guard deploy,
+  a fresh chat retrieved all six transaction months with `get_cashflow_summary` (₹3,43,539 total surplus), and its
+  next Lambda invocation accurately recalled that exact surplus from the saved turn. The direct snapshot tool also
+  saw six cashflow months and a non-zero net total.
+- Fresh verification at this point: Python **163 passed**, Node **269 passed**, frontend **140 passed**,
+  frontend production build succeeded, and `sam validate --lint` succeeded. Frontend lint still has pre-existing
+  warnings in Aviral's files; do not turn those into a broad UI refactor during the hackathon.
+- Working tree when this note was updated contains uncommitted, tested, **deployed** fixes in
+  `backend-python/agent/prompt.py`, `backend-python/agent/runner.py`, `backend-python/handlers/finance.py`, and
+  their two test files, plus the tested local-frontend Markdown rendering changes in `frontend/`. Do not reset or
+  discard them. Aryan has not asked to commit or push them yet.
+- Onboarding step 3 now accepts only CSV bank statements through the authenticated upload/process flow; users review
+  and correct every row before an explicit commit, with no transaction or autofill before successful commit. Autofill
+  uses the newest calendar month, excludes EMI/TRANSFER, sends INVESTMENTS only to monthly investment, and uses the
+  latest balance by date then API row order. Insurance remains manual (there is no insurance category).
+- Onboarding step 4 accepts a direct broker **holdings CSV** locally (not through an LLM or the bank-statement API).
+  It requires symbol, quantity, and average-price columns; the user reviews editable rows and presses Continue before
+  any holding is created as `IMPORTED`. Funds ledgers and tradebooks are intentionally rejected because they cannot
+  establish current quantities. `docs/examples/sample-broker-holdings-september-2026.csv` is a synthetic supported
+  fixture; `sample-broker-funds-ledger-september-2026.csv` is intentionally unsupported. PDF/image/XLSX support
+  remains out of scope.
+
+---
+
 ## 1. TL;DR
 
 - Repo: `C:\Users\admin\Desktop\Aryan\PROJECTS\Personal_AI_CFO` (Windows 11, Git Bash and PowerShell both available).
@@ -16,10 +64,12 @@ There is no second Claude reviewing your output any more, so section 12 (verific
 - 2026-09-19 we merged Aviral's v2 dashboard, News, Balance Sheet (holdings) and Milestones pages into main and
   built a real, authenticated AWS backend for them. Node 269/269, Python 91 (+34 unreviewed draft tests),
   frontend 80/80, `sam validate --lint` clean. Backend is deployed to the `aicfo-dev` stack.
-- Our guided 8-step onboarding is the entry flow and keeps its two "Auto-fill from statement" buttons (steps 3
-  and 4). Those buttons are still honest stubs; the backend they need is live. Wiring them is the top next job.
-- Not built yet: the AI chat agent, Upstox adapter (assigned to Ram+Sivsri), the four calculators' HTTP routes,
-  onboarding interest chips, frontend hosting, mutual-fund pricing.
+- Our guided 8-step onboarding is the entry flow. Step 3 has the reviewed bank-statement CSV flow; step 4 has a
+  locally parsed, reviewed broker-holdings CSV flow. Neither writes data until the user completes its explicit
+  confirmation action.
+- Built since this handover: the async ARIA chat agent, persisted conversation polling, dashboard FIRE flow,
+  and demo-user portfolio/goal/loan/transaction seed. Upstox, frontend hosting, mutual-fund pricing and richer
+  securities search remain separate work.
 - Hackathon runs Thu 17 to Sun 20 Sept 2026. Submission deadline was unpublished when the docs were written.
   Rule from `.agents/hackathon.md`: submit at least 3 hours before the deadline, aim for a rough submission
   Saturday night. Check `docs/submission.md` and `.agents/hackathon.md` before doing anything submission related.
@@ -126,9 +176,10 @@ Also in `.claude/CLAUDE.md` (checked in).
 - Secrets Manager: `aicfo/upstox`, `aicfo/firecrawl`, `aicfo/kilo`, `aicfo/google`. Aryan pastes real values in the
   console. `aicfo/upstox` and possibly others may still hold `REPLACE_ME`. Do not go looking for the values.
 - Bedrock is blocked (the account is on the AWS Free plan, which blocks Bedrock inference). Aryan chose to skip the
-  upgrade. **The chat model is Kilo AI Gateway** (OpenAI-compatible), model
-  `nvidia/nemotron-3-ultra-550b-a55b:free` pinned via `KILO_MODEL_ID`, base URL `KILO_BASE_URL`. See
-  `.agents/agent-guide.md#kilo-ai-gateway`. The Bedrock IAM policy is still in the template for an easy swap back.
+  upgrade. **The live chat model route is Kilo AI Gateway** (OpenAI-compatible), in this exact order:
+  `deepseek/deepseek-v4-flash-0731:free`,
+  `nvidia/nemotron-3-super-120b-a12b:free`, then `kilo-auto/free`. The base URL is `KILO_BASE_URL`; the key remains
+  in `aicfo/kilo`. See `.agents/agent-guide.md#kilo-ai-gateway`. The Bedrock IAM policy is parked for a later swap.
 - Three Lambdas:
   - `CrudFunction`: Node 22, `index.handler`, timeout 20s (raised from 10s for Yahoo fan-out).
   - `FinanceFunction`: Python 3.13, `handlers.finance.handler`, timeout 15s.
@@ -384,10 +435,9 @@ FD of 3,00,000 rupees at 7 percent. Cost bases were made realistic against live 
 
 ## 11. Open work, in the order I would do it
 
-1. **Wire the "Auto-fill from statement" buttons** on onboarding steps 3 and 4 (income/expenses and holdings) to the
-   live statements API. `frontend/src/lib/statementsApi.js` and `frontend/src/pages/CSVUpload.jsx` already do the
-   upload, process, review and commit flow against the real backend; reuse them rather than rewriting. This is our
-   own onboarding, so it is within scope. `seed/test-statement.csv` is a test file. Verify end to end in a browser.
+1. **Statement import next scope:** bank CSV and direct broker-holdings CSV imports are now wired. Keep PDF/image/XLSX
+   extraction out until the CSV review flows are stable; a broker funds ledger/tradebook needs a separately designed
+   position-reconstruction flow and must not be treated as a holdings export.
 2. **Review and commit the four calculator drafts** (tax, insurance, credit card payoff, short-term fit). They exist as
    untracked files with 34 passing tests, but nobody has checked them against the specs in `.agents/modules.md`
    (`# Module: calculators-seed`) and `.agents/finance-rules.md` (FY 2026-27 slabs, cess, rebates, LTCG 12.5 percent above
@@ -395,12 +445,10 @@ FD of 3,00,000 rupees at 7 percent. Cost bases were made realistic against live 
    routes `/calculators/tax`, `/calculators/capital-gains`, `/calculators/insurance`, `/calculators/credit-card-payoff`,
    `/securities/short-term-fit`, `/loans/emi`, `/loans/prepayment-impact` to `handlers/finance.py`, update openapi.
    The calculator UI pages (`frontend/src/pages/calculators/`) are Ram's/Aviral's territory: ask Aryan.
-3. **Chat agent** (`feat/agent-integrations`): Strands agent on Kilo, tool registry from `.agents/agent-guide.md`, the async
-   `/chat` then `/chat/{job_id}` flow, AppSync Events streaming with a polling fallback. `backend-python/agent/` and
-   `integrations/` are empty. mfapi, firecrawl, s3, secrets adapters are ours; the **Upstox adapter is Ram+Sivsri's**, so
-   ask before writing `integrations/upstox.py`. Web content safety pipeline and the six hostile-page fixtures are
-   specified in `.agents/agent-guide.md`. Aviral was offered a chat request/response contract for his Advisory page and
-   never replied; agree the shape with him (or write it into `contracts/openapi.yaml`) before building.
+3. **Chat extensions** (`feat/agent-integrations`): the Kilo/Strands async chat, polling flow, persistence and Tier-A
+   tools are now live. Do not replace the durable DynamoDB transcript with process memory. Remaining work is instrument
+   search/security detail, Upstox and mfapi integration, Firecrawl safety fixtures, and optionally AppSync browser
+   streaming (polling is the working fallback). The **Upstox adapter is Ram+Sivsri's**, so ask before writing it.
 4. **Onboarding step-6 interest chips**: two optional chip rows (sectors, and what they like to hold) in our 8-step flow,
    saved to `snapshot.preferences.{industries, instruments}` so News suggestions personalise from day one. Uses our own
    frontend; the label strings must match what `selectedPreferences` and `INDUSTRY_ALIASES` / `INSTRUMENT_ALIASES` in

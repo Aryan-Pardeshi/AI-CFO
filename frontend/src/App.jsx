@@ -17,6 +17,8 @@ import BalanceSheet from './pages/dashboard/BalanceSheet';
 import News from './pages/dashboard/News';
 import Investments from './pages/dashboard/Investments';
 import SecurityDetail from './pages/dashboard/SecurityDetail';
+import Landing from './pages/Landing';
+import MonthlyTracker from './pages/dashboard/MonthlyTracker';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, ProtectedRoute } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -29,8 +31,9 @@ function App() {
           <Router>
             <Routes>
               {/* Auth & Onboarding Routes */}
-              <Route path="/" element={<Layout />}>
-                <Route index element={<Navigate to="/register" replace />} />
+              <Route path="/" element={<Landing />} />
+
+              <Route element={<Layout />}>
                 <Route path="register" element={<Register />} />
                 <Route path="confirm" element={<ConfirmSignUp />} />
                 <Route path="login" element={<Login />} />
@@ -45,6 +48,7 @@ function App() {
                 <Route path="overview" element={<Overview />} />
                 <Route path="fire" element={<FireForecast />} />
                 <Route path="ai-advisory" element={<Advisory />} />
+                <Route path="monthly-tracker" element={<MonthlyTracker />} />
                 <Route path="milestones" element={<Milestones />} />
                 <Route path="balance-sheet" element={<BalanceSheet />} />
                 <Route path="news" element={<News />} />

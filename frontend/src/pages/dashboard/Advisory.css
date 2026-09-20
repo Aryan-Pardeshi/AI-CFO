@@ -321,6 +321,95 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
 }
 
+.advisory-markdown {
+  min-width: 0;
+  white-space: normal;
+}
+
+.advisory-markdown > :first-child {
+  margin-top: 0;
+}
+
+.advisory-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.advisory-markdown p,
+.advisory-markdown ul,
+.advisory-markdown ol {
+  margin: 0 0 0.75rem;
+}
+
+.advisory-markdown h1,
+.advisory-markdown h2,
+.advisory-markdown h3 {
+  margin: 1rem 0 0.5rem;
+  line-height: 1.25;
+}
+
+.advisory-markdown h1 { font-size: 1.35rem; }
+.advisory-markdown h2 { font-size: 1.2rem; }
+.advisory-markdown h3 { font-size: 1.05rem; }
+
+.advisory-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 0.75rem;
+}
+
+.advisory-markdown th,
+.advisory-markdown td {
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.advisory-markdown th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.aria-activity-trace,
+.aria-action-card {
+  margin-top: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: var(--surface-color);
+  font-size: 0.85rem;
+}
+
+.aria-activity-trace summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.aria-activity-items,
+.aria-citations,
+.aria-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.aria-activity-tag {
+  border-radius: 999px;
+  background: var(--background-color);
+  padding: 0.25rem 0.55rem;
+}
+
+.aria-citations a { color: var(--primary-color); }
+.aria-action-card dl { margin: 0.7rem 0; }
+.aria-action-card dl > div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.2rem 0; }
+.aria-action-card dt { color: var(--text-secondary); }
+.aria-action-card dd { margin: 0; font-weight: 600; }
+.aria-action-buttons button { min-height: 40px; padding: 0.5rem 0.9rem; border-radius: 8px; cursor: pointer; }
+
 .advisory-bubble.error {
   background: var(--surface-color);
   border: 1px solid var(--error-color);

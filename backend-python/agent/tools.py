@@ -8,7 +8,10 @@ engines/routes, returns {ok, data, source, as_of, assumptions, warnings} or
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import math
+import os
+import re
 from typing import Any
 
 try:  # Strands layer on Lambda; shim locally so unit tests run without it.
@@ -26,6 +29,243 @@ except Exception:  # pragma: no cover
 
 
 TOOL_CAP = 30
+
+# External adapters load lazily, so the default registry does not list them.
+# Activity records are UI labels only, and this static allowlist lets the runner
+# name them without a Secrets Manager or credential lookup. Kept in lockstep
+# with get_tool_registry() by test_activity_allowlist_matches_the_real_external_registry.
+EXTERNAL_TOOL_NAMES = frozenset({
+    "search_securities", "get_security_overview", "get_security_risk_metrics",
+    "analyze_portfolio_fit", "get_security_news",
+    "search_mutual_funds", "get_mutual_fund_nav",
+    "web_search", "read_web_page",
+})
+
+SAFE_ACTION_ENTITIES = frozenset({
+    "profile", "dashboard_financials", "holding", "goal", "loan",
+    "fire_scenario", "transaction_category",
+})
+SAFE_ACTION_OPERATIONS = frozenset({"create", "update", "delete"})
+_IDENTITY_FIELDS = frozenset({
+    "user_id", "account_id", "account_number", "account_no", "customer_id",
+    "email", "phone", "mobile", "cognito_sub", "sub", "token", "secret",
+    "password", "authorization", "access_token", "refresh_token",
+})
+_MAX_METADATA_STRING = 500
+_SUSPICIOUS_VALUE = re.compile(r"(?:api[_ -]?key|private[_ -]?key|secret|password|authorization|access[_ -]?token|refresh[_ -]?token|account[_ -]?(?:number|no|id))|\b\d{8,}\b", re.IGNORECASE)
+_RAW_FIELDS = frozenset({"result", "raw", "output", "response", "toolresult", "tooloutput"})
+_KNOWN_CITATION_SOURCES = frozenset({"holdings", "goals", "fire-engine", "networth-engine", "transactions", "MANUAL", "Firecrawl", "Upstox", "mfapi"})
+_KNOWN_CITATION_DOMAINS = frozenset({"rbi.org.in", "sebi.gov.in", "incometax.gov.in", "amfiindia.com", "upstox.com", "mfapi.in"})
+_RAW_MARKERS = re.compile(r"\b(?:tool|output|result|holding|allocation|response|raw)\b", re.IGNORECASE)
+_RAW_OUTPUT_MARKERS = re.compile(
+    r"\b(?:raw[\s_-]+(?:tool[\s_-]+)?|tool[\s_-]+|complete[\s_-]+)(?:output|result|response)s?\b",
+    re.IGNORECASE,
+)
+_ACTION_FIELDS = {
+    "profile": {"name", "date_of_birth", "base_currency", "monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "declared_net_worth_paise", "cash_balance_paise", "emergency_fund_target_months", "risk_profile", "risk_score", "investment_horizon_years", "strategy_goal", "dependents_count", "employment_type", "city_tier", "onboarded"},
+    "dashboard_financials": {"monthly_income_paise", "monthly_expenses_paise", "monthly_investment_paise", "cash_balance_paise", "declared_net_worth_paise"},
+    "holding": {"asset_type", "source", "instrument_key", "symbol", "isin", "name", "quantity", "avg_buy_price_paise", "first_buy_date", "manual_current_value_paise", "sector", "sip_monthly_paise", "fd_type", "fd_principal_paise", "fd_annual_rate", "fd_start_date", "fd_maturity_date"},
+    "goal": {"name", "goal_type", "amount_today_paise", "target_age", "inflation_rate"},
+    "loan": {"name", "loan_type", "outstanding_paise", "annual_rate", "tenure_months", "prepayment_charge_pct", "rate_type"},
+    "fire_scenario": {"goal_type", "amount_today_paise", "target_age"},
+    "transaction_category": {"category"},
+}
+_PAISE_FIELDS = {field for fields in _ACTION_FIELDS.values() for field in fields if field.endswith("_paise")}
+_RATIO_FIELDS = {"annual_rate", "fd_annual_rate", "inflation_rate", "prepayment_charge_pct"}
+_INT_RANGES = {"target_age": (18, 91), "tenure_months": (1, 480), "emergency_fund_target_months": (0, 120), "investment_horizon_years": (1, 91), "dependents_count": (0, 20), "risk_score": (4, 12)}
+
+
+def _normalized_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", key.lower())
+
+
+def _safe_string(value: str, *, field: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > _MAX_METADATA_STRING:
+        raise ValueError(f"invalid metadata {field}")
+    if any(ord(char) < 32 and char not in "\t\n" for char in value):
+        raise ValueError(f"invalid metadata {field}")
+    if _SUSPICIOUS_VALUE.search(value):
+        raise ValueError("metadata contains sensitive or account-like content")
+    return value.strip()
+
+
+def _assert_safe_metadata(value: Any) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                raise ValueError("metadata contains an account identity field")
+            normalized = _normalized_key(key)
+            if (normalized in {_normalized_key(item) for item in _IDENTITY_FIELDS}
+                    or normalized in _RAW_FIELDS
+                    or any(part in normalized for part in ("userid", "account", "email", "phone", "token", "secret", "password", "privatekey"))):
+                raise ValueError("metadata contains an account identity field")
+            _assert_safe_metadata(child)
+    elif isinstance(value, list):
+        if len(value) > 50:
+            raise ValueError("metadata list is too large")
+        for child in value:
+            _assert_safe_metadata(child)
+    elif isinstance(value, str):
+        _safe_string(value, field="value")
+    elif value is not None and not isinstance(value, (bool, int, float)):
+        raise ValueError("metadata value has an unsupported type")
+
+
+def _validate_action_payload(entity: str, payload: dict, *, allow_name: bool = False) -> dict:
+    if any(not isinstance(key, str) or key not in _ACTION_FIELDS[entity] for key in payload):
+        raise ValueError("unsupported proposal payload field")
+    if any(isinstance(value, (dict, list)) for value in payload.values()):
+        raise ValueError("nested proposal payloads are not supported")
+    for key, value in payload.items():
+        if key in _PAISE_FIELDS or key in _INT_RANGES:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError("proposal numeric field must be an integer")
+            if value < 0 or (key in _INT_RANGES and not _INT_RANGES[key][0] <= value <= _INT_RANGES[key][1]):
+                raise ValueError("proposal numeric field is out of range")
+        elif key in _RATIO_FIELDS:
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 0.36:
+                raise ValueError("proposal rate is out of range")
+        elif key == "onboarded":
+            if not isinstance(value, bool):
+                raise ValueError("onboarded must be boolean")
+        elif key == "quantity":
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                raise ValueError("quantity must be numeric")
+        elif not isinstance(value, str):
+            raise ValueError("proposal label must be a string")
+        elif key.endswith("_date") or key == "date_of_birth":
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                raise ValueError("proposal date must be ISO formatted")
+        else:
+            _safe_string(value, field=key)
+            if _RAW_OUTPUT_MARKERS.search(value):
+                raise ValueError("proposal label contains raw-output markers")
+            if key == "name" and not allow_name:
+                raise ValueError("free-text action names require the current user message")
+    return payload
+
+
+def record_activity(tool_name: str, status: str) -> dict:
+    """Build the small, UI-safe tool activity record persisted on a chat job."""
+    tool_name = _safe_string(tool_name, field="tool")
+    try:
+        registered = get_tool_registry()
+    except NameError:  # pragma: no cover
+        registered = {}
+    if tool_name not in registered and tool_name not in EXTERNAL_TOOL_NAMES:
+        raise ValueError("unknown tool activity")
+    if status not in {"started", "completed", "failed"}:
+        raise ValueError("invalid tool activity status")
+    return {"tool": tool_name.strip(), "status": status}
+
+
+def record_citation(source: str, as_of: str, title: str | None = None,
+                    *, domain: str | None = None, url: str | None = None,
+                    citation_id: str | None = None) -> dict:
+    """Build a citation without retaining a raw tool response or account data."""
+    source = _safe_string(source, field="source")
+    if source not in _KNOWN_CITATION_SOURCES:
+        raise ValueError("unknown citation source")
+    as_of = _safe_string(as_of, field="as_of")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T[^\s]{1,30})?", as_of):
+        raise ValueError("citation date must be ISO formatted")
+    result = {}
+    if citation_id is not None:
+        citation_id = _safe_string(citation_id, field="id")
+        # Result ids are opaque handles, never free text from the page.
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", citation_id):
+            raise ValueError("citation id is invalid")
+        result["id"] = citation_id
+    result.update({"source": source, "as_of": as_of})
+    if title is not None:
+        title = _safe_string(title, field="title")
+        if _RAW_MARKERS.search(title):
+            raise ValueError("citation title contains raw-output markers")
+        result["title"] = title
+    if domain is not None:
+        domain = _safe_string(domain, field="domain")
+        if not re.fullmatch(r"[A-Za-z0-9.-]{1,100}", domain) or "." not in domain or domain.lower() not in _KNOWN_CITATION_DOMAINS:
+            raise ValueError("citation domain is invalid")
+        result["domain"] = domain.lower()
+    if url is not None:
+        url = _safe_string(url, field="url")
+        if not re.fullmatch(r"https://[A-Za-z0-9.-]{1,100}(?:/[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{0,180})?", url):
+            raise ValueError("citation URL is invalid")
+        result["url"] = url
+    if source == "Firecrawl" and (citation_id is None or url is None):
+        raise ValueError("Firecrawl citations need id and URL")
+    _assert_safe_metadata(result)
+    return result
+
+
+def _proposal_expiry() -> str:
+    """Issue a server-owned short expiry; models never control proposal lifetime."""
+    return (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _validate_expiry(value: str) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T[^\s]{1,30}Z", value):
+        raise ValueError("proposal expiry must be UTC ISO formatted")
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("proposal expiry is invalid") from exc
+    if expiry <= datetime.now(timezone.utc):
+        raise ValueError("proposal has expired")
+    return value
+
+
+def _validate_proposal(entity: str, operation: str, *, target: str | None = None,
+                       payload: dict | None = None, current_message: str | None = None,
+                       require_user_text: bool = True, expires_at: str | None = None,
+                       issue_expiry: bool = False) -> dict:
+    """Validate a proposal; proposals are metadata only and are never persisted as writes."""
+    if entity not in SAFE_ACTION_ENTITIES:
+        raise ValueError("unsupported action entity")
+    if operation not in SAFE_ACTION_OPERATIONS:
+        raise ValueError("unsupported action operation")
+    if operation == "create" and target is not None:
+        raise ValueError("create actions cannot have a target")
+    if operation in {"update", "delete"} and (not isinstance(target, str) or not target.strip()):
+        raise ValueError("update/delete actions require a target")
+    if operation in {"create", "update"} and (not isinstance(payload, dict) or not payload):
+        raise ValueError("create/update actions require a payload")
+    if target is not None:
+        target = _safe_string(target, field="target")
+    if payload is not None:
+        if "name" in payload and require_user_text:
+            name = payload["name"]
+            if not isinstance(current_message, str) or not current_message.strip() or name.casefold() not in current_message.casefold():
+                raise ValueError("free-text action name is not from the current user message")
+        _validate_action_payload(entity, payload, allow_name=not require_user_text or "name" in payload)
+        _assert_safe_metadata(payload)
+    result = {"entity": entity, "operation": operation}
+    if target is not None:
+        result["target"] = target.strip()
+    if payload is not None:
+        result["payload"] = payload
+    if expires_at is not None:
+        result["expires_at"] = _validate_expiry(expires_at)
+    elif issue_expiry:
+        result["expires_at"] = _proposal_expiry()
+    _assert_safe_metadata(result)
+    return result
+
+
+@tool(context=True)
+def propose_action(entity: str, operation: str, *, target: str | None = None,
+                   payload: dict | None = None, tool_context=None) -> dict:
+    current_message = (getattr(tool_context, "invocation_state", {}) or {}).get("message")
+    return _validate_proposal(entity, operation, target=target, payload=payload,
+                              current_message=current_message, require_user_text=True,
+                              issue_expiry=True)
+
+
+def validate_stored_action(entity: str, operation: str, *, target: str | None = None,
+                           payload: dict | None = None, expires_at: str | None = None) -> dict:
+    """Revalidate persisted metadata without treating storage as a user turn."""
+    return _validate_proposal(entity, operation, target=target, payload=payload,
+                              require_user_text=False, expires_at=expires_at)
 
 
 class ToolCapExceeded(Exception):
@@ -68,6 +308,13 @@ def paise_to_inr(paise: int | float | None) -> float | None:
     if paise is None:
         return None
     return round(float(paise) / 100.0, 2)
+
+
+def _inr_paise(value: Any, *, nonnegative: bool = True) -> int:
+    number = float(value)
+    if not math.isfinite(number) or (nonnegative and number < 0):
+        raise ValueError("money amount must be finite and non-negative")
+    return round(number * 100)
 
 
 def _rupeeify(value: Any) -> Any:
@@ -404,8 +651,305 @@ def get_cashflow_summary(tool_context) -> dict:
                      source="transactions", as_of=_now())
 
 
-def get_tool_registry() -> dict:
-    return {
+def _read_collection(tool_context, name: str, source: str) -> dict:
+    user_id = _check_cap(tool_context, name)
+    try:
+        from handlers.finance import load_user_data
+        data = load_user_data(user_id)
+    except Exception:
+        try:
+            data = _load_user_data(user_id)
+        except Exception as exc:
+            return err_result("UNAVAILABLE", f"{source} data is unavailable right now.")
+    if name == "get_profile" and not data.get("user"):
+        return err_result("NOT_FOUND", "User profile not found")
+    values = data.get(source, []) if source != "profile" else data.get("user")
+    if not values and source != "profile":
+        return err_result("NOT_FOUND", f"No {source} data found")
+    return ok_result(_rupeeify({source: values}), source=source, as_of=_now())
+
+
+@tool(context=True)
+def get_profile(tool_context) -> dict:
+    return _read_collection(tool_context, "get_profile", "profile")
+
+
+@tool(context=True)
+def get_holdings(tool_context) -> dict:
+    return _read_collection(tool_context, "get_holdings", "holdings")
+
+
+@tool(context=True)
+def get_loans(tool_context) -> dict:
+    return _read_collection(tool_context, "get_loans", "loans")
+
+
+def _calculator_context(tool_context, name: str) -> None:
+    _check_cap(tool_context, name)
+
+
+@tool(context=True)
+def calculate_emi(principal_inr: float, annual_rate_pct: float, tenure_months: int, tool_context) -> dict:
+    _calculator_context(tool_context, "calculate_emi")
+    try:
+        principal = float(principal_inr) * 100
+        rate = float(annual_rate_pct) / 100
+        tenure = int(tenure_months)
+        if principal < 0 or rate < 0 or rate > 0.36 or tenure < 1 or tenure > 480:
+            raise ValueError
+        from handlers.finance import _monthly_emi_paise
+        emi = _monthly_emi_paise(principal, rate, tenure)
+        return ok_result(_rupeeify({"principal_paise": round(principal), "monthly_emi_paise": round(emi), "tenure_months": tenure}), "loan-engine", _now())
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "principal, rate, and tenure are invalid")
+
+
+@tool(context=True)
+def calculate_prepayment_impact(principal_inr: float, annual_rate_pct: float,
+                                tenure_months: int, prepayment_inr: float,
+                                prepayment_charge_pct: float = 0,
+                                tool_context=None) -> dict:
+    _calculator_context(tool_context, "calculate_prepayment_impact")
+    try:
+        principal = float(principal_inr) * 100
+        prepayment = float(prepayment_inr) * 100
+        rate = float(annual_rate_pct) / 100
+        tenure = int(tenure_months)
+        if principal <= 0 or prepayment < 0 or prepayment >= principal or rate < 0 or tenure < 1 or tenure > 480:
+            raise ValueError
+        from agent.loan_calculations import prepayment_impact
+        result = prepayment_impact(round(principal), rate, tenure, round(prepayment), float(prepayment_charge_pct))
+        warnings = result.pop("warnings", [])
+        return ok_result(_rupeeify(result), "loan-engine", _now(), warnings=warnings)
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "loan and prepayment inputs are invalid")
+
+
+def _run_finance(name: str, func, kwargs: dict, tool_context) -> dict:
+    _calculator_context(tool_context, name)
+    try:
+        result = func(**kwargs)
+        warnings = result.get("warnings", []) if isinstance(result, dict) else []
+        return ok_result(_rupeeify(result), "finance-engine", _now(), warnings=warnings)
+    except (TypeError, ValueError, OverflowError) as exc:
+        return err_result("VALIDATION_ERROR", str(exc))
+
+
+@tool(context=True)
+def estimate_income_tax(income_inr: float | None = None, regime: str = "new", tool_context=None) -> dict:
+    from finance.tax import estimate_income_tax as fn
+    try:
+        return _run_finance("estimate_income_tax", fn, {"income_paise": None if income_inr is None else _inr_paise(income_inr), "regime": regime}, tool_context)
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "income-tax inputs are invalid")
+
+
+@tool(context=True)
+def compare_tax_regimes(income_inr: float | None = None, tool_context=None) -> dict:
+    from finance.tax import compare_tax_regimes as fn
+    try:
+        return _run_finance("compare_tax_regimes", fn, {"income_paise": None if income_inr is None else _inr_paise(income_inr)}, tool_context)
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "tax inputs are invalid")
+
+
+@tool(context=True)
+def estimate_capital_gains_tax(gain_inr: float, asset_type: str = "LISTED_EQUITY", holding_period_months: int | None = None, tool_context=None) -> dict:
+    from finance.tax import estimate_capital_gains_tax as fn
+    try:
+        return _run_finance("estimate_capital_gains_tax", fn, {"gain_paise": round(float(gain_inr) * 100), "asset_type": asset_type, "holding_period_months": holding_period_months}, tool_context)
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "capital-gains inputs are invalid")
+
+
+@tool(context=True)
+def estimate_insurance_needs(inputs: dict | None = None, tool_context=None) -> dict:
+    from finance.insurance import estimate_insurance_needs as fn
+    try:
+        values = dict(inputs or {})
+        for key in list(values):
+            if key.endswith("_inr"):
+                values[key[:-4] + "_paise"] = _inr_paise(values.pop(key))
+        return _run_finance("estimate_insurance_needs", fn, {"inputs": values}, tool_context)
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "insurance inputs are invalid")
+
+
+@tool(context=True)
+def calculate_credit_card_payoff(outstanding_inr: float, monthly_interest_pct: float, monthly_payment_inr: float, tool_context=None) -> dict:
+    from finance.creditcard import calculate_credit_card_payoff as fn
+    try:
+        return _run_finance("calculate_credit_card_payoff", fn, {"outstanding_paise": round(float(outstanding_inr) * 100), "monthly_interest_pct": float(monthly_interest_pct), "monthly_payment_paise": round(float(monthly_payment_inr) * 100)}, tool_context)
+    except (TypeError, ValueError, OverflowError):
+        return err_result("VALIDATION_ERROR", "credit-card inputs are invalid")
+
+
+@tool(context=True)
+def analyze_short_term_fit(price_history: list, horizon_months: int, tool_context=None) -> dict:
+    from finance.shortterm import analyze_short_term_fit as fn
+    return _run_finance("analyze_short_term_fit", fn, {"price_history": price_history, "horizon_months": horizon_months}, tool_context)
+
+
+def _market_client(tool_context):
+    client = getattr(tool_context, "invocation_state", {}).get("upstox_client") if tool_context else None
+    if client is None:
+        from integrations.upstox import UpstoxClient
+        client = UpstoxClient()
+    return client
+
+
+def _external_call(call):
+    try:
+        result = call()
+        if not isinstance(result, dict):
+            return err_result("UPSTREAM_UNAVAILABLE", "External data is unavailable right now")
+        return result
+    except (ValueError, TypeError, OverflowError):
+        return err_result("VALIDATION_ERROR", "External-data inputs are invalid")
+    except Exception:
+        return err_result("UPSTREAM_UNAVAILABLE", "External data is unavailable right now")
+
+
+@tool(context=True)
+def search_securities(query: str, asset_type: str = "", limit: int = 10, tool_context=None) -> dict:
+    _calculator_context(tool_context, "search_securities")
+    return _external_call(lambda: _market_client(tool_context).search(
+        query, asset_type=asset_type or None, limit=min(int(limit), 10)))
+
+
+@tool(context=True)
+def get_security_overview(instrument_key: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_security_overview")
+    return _external_call(lambda: _market_client(tool_context).overview(instrument_key))
+
+
+@tool(context=True)
+def get_security_risk_metrics(instrument_key: str, period: str = "1y", tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_security_risk_metrics")
+    return _external_call(lambda: _market_client(tool_context).risk_metrics(instrument_key, period))
+
+
+@tool(context=True)
+def analyze_portfolio_fit(instrument_key: str, add_amount_inr: float = 0, tool_context=None) -> dict:
+    _calculator_context(tool_context, "analyze_portfolio_fit")
+    return _external_call(lambda: _market_client(tool_context).portfolio_fit(instrument_key, float(add_amount_inr)))
+
+
+@tool(context=True)
+def get_security_news(instrument_key: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_security_news")
+    return _external_call(lambda: _market_client(tool_context).news(instrument_key))
+
+
+def _mf_client(tool_context):
+    client = getattr(tool_context, "invocation_state", {}).get("mfapi_client") if tool_context else None
+    if client is None:
+        from integrations.mfapi import MfapiClient
+        client = MfapiClient()
+    return client
+
+
+@tool(context=True)
+def search_mutual_funds(query: str, limit: int = 10, tool_context=None) -> dict:
+    _calculator_context(tool_context, "search_mutual_funds")
+    return _external_call(lambda: _mf_client(tool_context).search_schemes(query, limit=min(int(limit), 10)))
+
+
+@tool(context=True)
+def get_mutual_fund_nav(scheme_code: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "get_mutual_fund_nav")
+    return _external_call(lambda: _mf_client(tool_context).latest_nav(scheme_code))
+
+
+def _research_client(tool_context):
+    state = getattr(tool_context, "invocation_state", None) if tool_context else None
+    client = state.get("firecrawl_client") if isinstance(state, dict) else None
+    if client is None:
+        from integrations.firecrawl import FirecrawlClient
+        client = FirecrawlClient(http=_requests_client(), api_key=os.environ.get("FIRECRAWL_API_KEY"))
+        if isinstance(state, dict):
+            # One client (and therefore one ResearchGuard) per job: search/read caps
+            # and same-job result IDs must survive across tool calls, and a fresh job
+            # gets a fresh state dict so nothing leaks between jobs.
+            state["firecrawl_client"] = client
+    return client
+
+
+def _requests_client():
+    import requests
+    return requests
+
+
+@tool(context=True)
+def web_search(query: str, source: str = "web", recency: str = "", country: str = "IN", tool_context=None) -> dict:
+    _calculator_context(tool_context, "web_search")
+    return _external_call(lambda: _research_client(tool_context).search(
+        query, source=source, recency=recency or None, country=country))
+
+
+@tool(context=True)
+def read_web_page(result_id_or_url: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "read_web_page")
+    state = getattr(tool_context, "invocation_state", {})
+    return _external_call(lambda: _research_client(tool_context).read(
+        result_id_or_url, user_urls=state.get("user_urls", ())))
+
+
+from agent.action_proposals import (
+    propose_dashboard_preferences as _propose_dashboard_preferences,
+    propose_fire_scenario as _propose_fire_scenario,
+    propose_goal_update as _propose_goal_update,
+    propose_holding_update as _propose_holding_update,
+    propose_holdings_update as _propose_holdings_update,
+    propose_loan_update as _propose_loan_update,
+    propose_profile_update as _propose_profile_update,
+    propose_transaction_category_change as _propose_transaction_category_change,
+)
+
+@tool(context=True)
+def propose_profile_update(payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_profile_update")
+    return _propose_profile_update(payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_dashboard_preferences(payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_dashboard_preferences")
+    return _propose_dashboard_preferences(payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_holding_update(target: str, payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_holding_update")
+    return _propose_holding_update(target, payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_holdings_update(target: str, payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_holdings_update")
+    return _propose_holdings_update(target, payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_goal_update(target: str, payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_goal_update")
+    return _propose_goal_update(target, payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_loan_update(target: str, payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_loan_update")
+    return _propose_loan_update(target, payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_fire_scenario(payload: dict, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_fire_scenario")
+    return _propose_fire_scenario(payload, tool_context=tool_context)
+
+@tool(context=True)
+def propose_transaction_category_change(target: str, category: str, tool_context=None) -> dict:
+    _calculator_context(tool_context, "propose_transaction_category_change")
+    return _propose_transaction_category_change(target, category, tool_context=tool_context)
+
+
+def get_tool_registry(include_external: bool = False, external_clients: dict | None = None,
+                      discover: bool = False) -> dict:
+    registry = {
         "get_financial_snapshot": get_financial_snapshot,
         "get_portfolio_analysis": get_portfolio_analysis,
         "get_goals": get_goals,
@@ -414,4 +958,49 @@ def get_tool_registry() -> dict:
         "get_net_worth": get_net_worth,
         "project_net_worth": project_net_worth,
         "get_cashflow_summary": get_cashflow_summary,
+        "get_profile": get_profile,
+        "get_holdings": get_holdings,
+        "get_loans": get_loans,
+        "calculate_emi": calculate_emi,
+        "calculate_prepayment_impact": calculate_prepayment_impact,
+        "estimate_income_tax": estimate_income_tax,
+        "compare_tax_regimes": compare_tax_regimes,
+        "estimate_capital_gains_tax": estimate_capital_gains_tax,
+        "estimate_insurance_needs": estimate_insurance_needs,
+        "calculate_credit_card_payoff": calculate_credit_card_payoff,
+        "analyze_short_term_fit": analyze_short_term_fit,
+        "propose_profile_update": propose_profile_update,
+        "propose_dashboard_preferences": propose_dashboard_preferences,
+        "propose_holding_update": propose_holding_update,
+        "propose_holdings_update": propose_holdings_update,
+        "propose_profile_risk_update": propose_profile_update,
+        "propose_goal_update": propose_goal_update,
+        "propose_loan_update": propose_loan_update,
+        "propose_fire_scenario": propose_fire_scenario,
+        "propose_transaction_category_change": propose_transaction_category_change,
+        "propose_action": propose_action,
     }
+    # Adapters are injected by the authenticated runner only when credentials/backing
+    # services are live. Never expose a model tool that can only return a stub.
+    external_clients = external_clients or {}
+    upstox_ready = "upstox" in external_clients or os.environ.get("UPSTOX_ANALYTICS_TOKEN")
+    firecrawl_ready = "firecrawl" in external_clients or os.environ.get("FIRECRAWL_API_KEY")
+    if include_external and discover:
+        if not upstox_ready:
+            from integrations.upstox import _secret_token
+            upstox_ready = bool(_secret_token("aicfo/upstox", "analytics_token"))
+        if not firecrawl_ready:
+            firecrawl_ready = bool(__import__("integrations.firecrawl", fromlist=["_secret_token"])._secret_token())
+    if include_external and upstox_ready:
+        registry.update({
+            "search_securities": search_securities,
+            "get_security_overview": get_security_overview,
+            "get_security_risk_metrics": get_security_risk_metrics,
+            "analyze_portfolio_fit": analyze_portfolio_fit,
+            "get_security_news": get_security_news,
+        })
+    if include_external and firecrawl_ready:
+        registry.update({"web_search": web_search, "read_web_page": read_web_page})
+    if include_external:
+        registry.update({"search_mutual_funds": search_mutual_funds, "get_mutual_fund_nav": get_mutual_fund_nav})
+    return registry

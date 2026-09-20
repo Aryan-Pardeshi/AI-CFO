@@ -188,7 +188,10 @@ export function loanRowSync(row) {
   const untouched =
     isBlankString(row.name) &&
     isBlankString(row.principal) &&
-    isBlankString(row.outstanding);
+    isBlankString(row.outstanding) &&
+    isBlankString(row.issuer) &&
+    isBlankString(row.credit_limit) &&
+    isBlankString(row.payment_due_day);
   if (untouched) return 'skip';
   return row.server_id ? 'update' : 'create';
 }
@@ -222,8 +225,8 @@ export function buildHoldingPayload({ assetType, symbol, name, quantity, avgBuyP
   return payload;
 }
 
-export function buildLoanPayload({ loanType, name, principalPaise, outstandingPaise, annualRate, tenureMonths, startDate, rateType }) {
-  return {
+export function buildLoanPayload({ loanType, name, principalPaise, outstandingPaise, annualRate, tenureMonths, startDate, rateType, issuer, creditLimitPaise, paymentDueDay }) {
+  const payload = {
     loan_type: loanType,
     name,
     principal_paise: principalPaise,
@@ -233,6 +236,39 @@ export function buildLoanPayload({ loanType, name, principalPaise, outstandingPa
     start_date: startDate,
     rate_type: rateType,
   };
+  // Card-only metadata travels only for credit cards; unrelated loan types
+  // omit the keys entirely so the server never sees them.
+  if (loanType === 'CREDIT_CARD') {
+    if (issuer !== undefined) payload.issuer = issuer;
+    if (creditLimitPaise !== undefined) payload.credit_limit_paise = creditLimitPaise;
+    if (paymentDueDay !== undefined) payload.payment_due_day = paymentDueDay;
+  }
+  return payload;
+}
+
+export function validateCardFields({ loanType, issuer, creditLimit, paymentDueDay }) {
+  const errors = {};
+  if (loanType !== 'CREDIT_CARD') return errors;
+  const trimmed = String(issuer ?? '').trim();
+  if (trimmed !== '' && trimmed.length > 120) {
+    errors.issuer = 'Issuer must be 120 characters or fewer';
+  }
+  if (String(creditLimit ?? '').trim() !== '') {
+    try {
+      const paise = rupeesToPaise(creditLimit);
+      if (paise < 0 || paise > MAX_PAISE) errors.credit_limit = 'Credit limit must be between ₹0 and ₹10 crore';
+    } catch {
+      errors.credit_limit = 'Credit limit must be a valid amount with up to 2 decimals';
+    }
+  }
+  const dayRaw = String(paymentDueDay ?? '').trim();
+  if (dayRaw !== '') {
+    const day = Number(dayRaw);
+    if (!Number.isInteger(day) || day < 1 || day > 31) {
+      errors.payment_due_day = 'Due day must be a whole number from 1 to 31';
+    }
+  }
+  return errors;
 }
 
 export function buildGoalPayload({ name, goalType, amountPaise, targetAge, inflationRate }) {

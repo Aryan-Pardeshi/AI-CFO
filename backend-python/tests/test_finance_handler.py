@@ -255,3 +255,149 @@ def test_plain_numbers_preserves_int_and_float():
     assert isinstance(out["nested"][0]["q"], int)
     assert out["text"] == "2026-01-15"
     assert out["none"] is None
+
+
+def test_load_user_data_includes_authenticated_users_transactions(monkeypatch):
+    """Agent snapshot callers must receive the persisted transaction rows too."""
+    queried = []
+
+    monkeypatch.setattr(fin, "_get_user", lambda user_id: {"user_id": user_id})
+
+    def query(table_env_var, user_id):
+        queried.append((table_env_var, user_id))
+        if table_env_var == "TRANSACTIONS_TABLE":
+            return [{
+                "txn_id": "txn-1",
+                "txn_date": "2026-09-01",
+                "amount_paise": Decimal("8500000"),
+                "direction": "CREDIT",
+            }]
+        return []
+
+    monkeypatch.setattr(fin, "_query_table", query)
+
+    data = fin.load_user_data("user-123")
+
+    assert ("TRANSACTIONS_TABLE", "user-123") in queried
+    assert data["transactions"] == [{
+        "txn_id": "txn-1",
+        "txn_date": "2026-09-01",
+        "amount_paise": 8500000,
+        "direction": "CREDIT",
+    }]
+
+
+class _MutationTable:
+    def __init__(self, item=None):
+        self.item = item
+        self.puts = []
+
+    def get_item(self, **kwargs):
+        key = kwargs["Key"]
+        if self.item and self.item.get("user_id") == key.get("user_id"):
+            if "txn_id" not in key or self.item.get("txn_id") == key.get("txn_id"):
+                return {"Item": self.item}
+        return {}
+
+    def put_item(self, **kwargs):
+        self.puts.append(kwargs)
+        self.item = kwargs["Item"]
+
+    def update_item(self, **kwargs):
+        if self.item is None:
+            return {"Attributes": {}}
+        values = kwargs.get("ExpressionAttributeValues", {})
+        self.item = {**self.item, "category": values.get(":category", self.item.get("category")),
+                     "category_source": values.get(":source", self.item.get("category_source")),
+                     "version": values.get(":next_version", self.item.get("version")),
+                     "updated_at": values.get(":updated_at", self.item.get("updated_at"))}
+        return {"Attributes": self.item}
+
+    def query(self, **kwargs):
+        return {"Items": [self.item] if self.item and self.item.get("user_id") == "user-123" else []}
+
+
+class _ConditionalMutationTable(_MutationTable):
+    def __init__(self, item=None, conditional_failure=False):
+        super().__init__(item)
+        self.conditional_failure = conditional_failure
+
+    def update_item(self, **kwargs):
+        if self.conditional_failure:
+            error = RuntimeError("conditional failure")
+            error.response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+            raise error
+        assert kwargs["Key"]["user_id"] == "user-123"
+        assert kwargs["Key"]["txn_sk"] == self.item["txn_sk"]
+        self.item = {**self.item, "category": kwargs["ExpressionAttributeValues"][":category"],
+                     "category_source": "user", "version": kwargs["ExpressionAttributeValues"][":next_version"]}
+        return {"Attributes": self.item}
+
+
+def test_fire_scenario_create_uses_verified_owner_and_validates_body(monkeypatch):
+    table = _MutationTable()
+    monkeypatch.setattr(fin, "_table", lambda name: table)
+    monkeypatch.setattr(fin, "load_user_data", lambda user_id: DEMO_DATA)
+    res = fin.handler(_event("POST", "/fire/scenarios", body={
+        "name": "Retirement test", "inputs": {"target_age": 50},
+    }), None)
+    assert res["statusCode"] == 201
+    saved = json.loads(res["body"])
+    assert saved["scenario"]["user_id"] == "user-123"
+    assert saved["scenario"]["name"] == "Retirement test"
+    assert table.puts[0]["Item"]["user_id"] == "user-123"
+
+
+def test_fire_scenario_rejects_malformed_body(monkeypatch):
+    monkeypatch.setattr(fin, "_table", lambda name: _MutationTable())
+    res = fin.handler(_event("POST", "/fire/scenarios", body={"inputs": []}), None)
+    assert res["statusCode"] == 400
+    assert json.loads(res["body"])["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_transaction_category_update_enforces_owner_and_version(monkeypatch):
+    table = _MutationTable({"user_id": "other-user", "txn_id": "txn-1", "category": "OTHER", "version": 2})
+    monkeypatch.setattr(fin, "_table", lambda name: table)
+    res = fin.handler(_event("PATCH", "/transactions/txn-1/category", body={
+        "category": "GROCERIES", "version": 2,
+    }), None)
+    assert res["statusCode"] in {404, 409}
+
+    table.item = {"user_id": "user-123", "txn_id": "txn-1", "category": "OTHER", "version": 3}
+    stale = fin.handler(_event("PATCH", "/transactions/txn-1/category", body={
+        "category": "GROCERIES", "version": 2,
+    }), None)
+    assert stale["statusCode"] == 409
+    assert table.item["category"] == "OTHER"
+
+    fresh = fin.handler(_event("PATCH", "/transactions/txn-1/category", body={
+        "category": "GROCERIES", "version": 3,
+    }), None)
+    assert fresh["statusCode"] == 200
+    assert table.item["category"] == "GROCERIES"
+
+
+def test_transaction_category_update_translates_atomic_conditional_failure(monkeypatch):
+    table = _ConditionalMutationTable({"user_id": "user-123", "txn_sk": "2026-09-01#txn-1",
+                                       "txn_id": "txn-1", "category": "OTHER", "version": 3},
+                                      conditional_failure=True)
+    monkeypatch.setattr(fin, "_table", lambda name: table)
+    res = fin.handler(_event("PATCH", "/transactions/txn-1/category", body={
+        "category": "GROCERIES", "version": 3,
+    }), None)
+    assert res["statusCode"] == 409
+    assert json.loads(res["body"])["error"]["code"] == "CONFLICT"
+
+
+@pytest.mark.parametrize("inputs", [
+    {"current_age": 17, "monthly_expenses_paise": 1, "monthly_investment_paise": 1,
+     "current_corpus_paise": 0, "lifespan_age": 91},
+    {"current_age": 40, "monthly_expenses_paise": 1, "monthly_investment_paise": 1,
+     "current_corpus_paise": 0, "unknown": 1},
+    {"current_age": 40, "monthly_expenses_paise": -1, "monthly_investment_paise": 1,
+     "current_corpus_paise": 0},
+])
+def test_fire_scenario_rejects_invalid_or_unknown_inputs(monkeypatch, inputs):
+    monkeypatch.setattr(fin, "_table", lambda name: _MutationTable())
+    res = fin.handler(_event("POST", "/fire/scenarios", body={"name": "Bad", "inputs": inputs}), None)
+    assert res["statusCode"] == 400

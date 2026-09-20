@@ -1,41 +1,51 @@
 export const RISK_QUESTIONS = [
   {
     key: 'horizon_need',
-    question: 'When will you need most of this money?',
+    question: 'When might you need to use most of this investment money?',
     options: [
-      { points: 1, label: 'In less than 3 years' },
+      { points: 1, label: 'Within 3 years' },
       { points: 2, label: 'In 3 to 7 years' },
-      { points: 3, label: 'After 7 years' },
+      { points: 3, label: 'More than 7 years' },
     ],
   },
   {
     key: 'drawdown_reaction',
-    question: 'Your portfolio drops 20% in a month. You…',
+    question: 'If your investments fell 20% in one month, what would you most likely do?',
     options: [
-      { points: 1, label: 'Sell to stop further loss' },
-      { points: 2, label: 'Hold and wait' },
-      { points: 3, label: 'Buy more at lower prices' },
+      { points: 1, label: 'Sell to avoid further losses' },
+      { points: 2, label: 'Stay invested and wait' },
+      { points: 3, label: 'Invest more while prices are lower' },
     ],
   },
   {
     key: 'income_stability',
-    question: 'How stable is your income?',
+    question: 'How secure is your income and emergency fund today?',
     options: [
-      { points: 1, label: 'Unstable' },
-      { points: 2, label: 'Stable' },
-      { points: 3, label: 'Stable, with a 6-month buffer' },
+      { points: 1, label: 'Income changes often or I have no buffer' },
+      { points: 2, label: 'Stable income, with a limited buffer' },
+      { points: 3, label: 'Stable income and a 6+ month buffer' },
     ],
   },
   {
     key: 'experience',
-    question: 'What is your investing experience?',
+    question: 'How familiar are you with investing?',
     options: [
-      { points: 1, label: 'None' },
-      { points: 2, label: 'Mutual funds' },
-      { points: 3, label: 'Stocks, several years' },
+      { points: 1, label: 'New to investing' },
+      { points: 2, label: 'Some experience with mutual funds or stocks' },
+      { points: 3, label: 'Comfortable managing investments myself' },
     ],
   },
 ];
+
+export const RISK_WILLINGNESS_QUESTION = {
+  question: 'How much investment risk are you comfortable taking?',
+  helper: 'This is about the market ups and downs you can genuinely live with, not your investing experience.',
+  options: [
+    { profile: 'CONSERVATIVE', label: 'Low — protecting my money matters most' },
+    { profile: 'MODERATE', label: 'Medium — I can accept some ups and downs' },
+    { profile: 'AGGRESSIVE', label: 'High — I can accept sharp ups and downs for higher return potential' },
+  ],
+};
 
 export function scoreRiskAnswers(answers) {
   if (!Array.isArray(answers) || answers.length !== 4) {

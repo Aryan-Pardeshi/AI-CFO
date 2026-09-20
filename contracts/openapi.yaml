@@ -156,6 +156,20 @@ components:
         start_date: {type: string, format: date}
         rate_type: {$ref: '#/components/schemas/RateType'}
         prepayment_charge_pct: {type: number, default: 0}
+        issuer: {type: string, maxLength: 120, nullable: true, description: "Card issuer for CREDIT_CARD loans only; trimmed, optional."}
+        credit_limit_paise: {type: integer, minimum: 0, maximum: 10000000000, nullable: true, description: "Total credit limit for CREDIT_CARD loans only, integer paise."}
+        payment_due_day: {type: integer, minimum: 1, maximum: 31, nullable: true, description: "Statement due day-of-month for CREDIT_CARD loans only."}
+        monthly_emi_paise:
+          type: integer
+          minimum: 0
+          nullable: true
+          readOnly: true
+          description: >-
+            Read-only, server-derived monthly EMI in integer paise from the locked reducing-balance
+            formula in .agents/finance-rules.md, computed over the loan's own stored
+            principal/rate/tenure. Present on GET /loans list items only; null when the stored loan
+            lacks a usable principal, annual_rate or tenure_months. Never accepted on write — sending
+            it returns VALIDATION_ERROR like any other unknown field.
 
     PortfolioAnalysis:
       type: object
@@ -568,22 +582,47 @@ components:
             totals: {$ref: '#/components/schemas/CashflowTotals'}
         committed_row_count: {type: integer, minimum: 0, maximum: 1000}
 
+    CashflowCategory:
+      type: object
+      required: [category, income_paise, expense_paise, net_paise]
+      description: >-
+        One committed-transaction category bucket. `category` is the stored txn_category value, or
+        null for committed rows that carry no category — the label for null is a UI concern, the API
+        never invents one.
+      properties:
+        category: {oneOf: [{$ref: '#/components/schemas/TxnCategory'}, {type: 'null'}]}
+        income_paise: {type: integer, minimum: 0}
+        expense_paise: {type: integer, minimum: 0}
+        net_paise: {type: integer}
+
     CashflowMonth:
       type: object
-      required: [month, income_paise, expense_paise, net_paise]
+      required: [month, income_paise, expense_paise, net_paise, categories]
       properties:
         month: {type: string, pattern: '^\\d{4}-\\d{2}$'}
         income_paise: {type: integer, minimum: 0}
         expense_paise: {type: integer, minimum: 0}
         net_paise: {type: integer}
+        categories:
+          type: array
+          description: >-
+            Per-category breakdown of this month's committed transactions, sorted by expense_paise
+            descending then category ascending (null category last). Empty array when the month has
+            no committed rows. Derived only from committed `transactions` rows — never from the
+            profile and never estimated.
+          items: {$ref: '#/components/schemas/CashflowCategory'}
 
     CashflowTotals:
       type: object
-      required: [income_paise, expense_paise, net_paise]
+      required: [income_paise, expense_paise, net_paise, categories]
       properties:
         income_paise: {type: integer, minimum: 0}
         expense_paise: {type: integer, minimum: 0}
         net_paise: {type: integer}
+        categories:
+          type: array
+          description: Same breakdown as CashflowMonth.categories, aggregated across every committed month.
+          items: {$ref: '#/components/schemas/CashflowCategory'}
 
     CashflowSummary:
       type: object
@@ -798,7 +837,17 @@ paths:
         '404': {description: No user profile, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /fire/scenarios:
     get: {summary: List saved scenarios, responses: {'200': {description: OK}}}
-    post: {summary: Save a scenario, responses: {'201': {description: Created}}}
+    post:
+      summary: Save a scenario after explicit browser confirmation
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name, inputs], properties: {name: {type: string, maxLength: 120}, inputs: {type: object, additionalProperties: false, description: "Optional FIRE overrides. Allowed fields are target_age/current_age (18-120), monthly_expenses_paise/monthly_investment_paise (0..10^13), current_corpus_paise (0..10^17), inflation/step_up (0..1), return_before_40/return_40_to_60/return_after_60/post_fire_return (-1..2), lifespan_age (40..120), and bounded goals/loans lists."}}}}}}
+      responses: {'201': {description: Created}, '400': {description: Validation error}, '401': {description: Unauthorized}}
+
+  /transactions/{txn_id}/category:
+    patch:
+      summary: Change one owned transaction category after explicit browser confirmation
+      parameters: [{name: txn_id, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [category, version], properties: {category: {$ref: '#/components/schemas/TxnCategory'}, version: {type: integer, minimum: 1}}}}}}
+      responses: {'200': {description: Updated}, '400': {description: Validation error}, '404': {description: Not found or not owned}, '409': {description: Version conflict}}
 
   /net-worth:
     get:

@@ -49,7 +49,9 @@ const DashboardLayout = () => {
           <NavLink to="/overview" style={navLinkStyle}>Overview</NavLink>
           <NavLink to="/investments" style={navLinkStyle}>Investments</NavLink>
           <NavLink to="/ai-advisory" style={navLinkStyle}>ARIA Advisory</NavLink>
+          <NavLink to="/monthly-tracker" style={navLinkStyle}>Monthly Tracker</NavLink>
           <NavLink to="/milestones" style={navLinkStyle}>Milestones</NavLink>
+          <NavLink to="/fire" style={navLinkStyle}>FIRE</NavLink>
           <NavLink to="/balance-sheet" style={navLinkStyle}>Balance Sheet</NavLink>
           <NavLink to="/news" style={navLinkStyle}>News & Intelligence</NavLink>
         </nav>
@@ -110,8 +112,14 @@ const DashboardLayout = () => {
           <NavLink to="/ai-advisory" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
             ARIA Advisory
           </NavLink>
+          <NavLink to="/monthly-tracker" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
+            Monthly Tracker
+          </NavLink>
           <NavLink to="/milestones" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
             Milestones
+          </NavLink>
+          <NavLink to="/fire" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
+            FIRE
           </NavLink>
           <NavLink to="/balance-sheet" className={({ isActive }) => `mobile-nav-link ${isActive ? 'active' : ''}`} onClick={closeMobileMenu}>
             Balance Sheet
