@@ -1,0 +1,171 @@
+/*
+ * ARIA landing page styles.
+ *
+ * The rest of the app is not built on Tailwind and ships global rules (`* { margin: 0 }`,
+ * `h1..h6 { font-weight: 600 }`, a dashboard `--font-serif`). This file keeps the landing page
+ * from leaking into those pages and from being flattened by them:
+ *   - utilities are nested under `.aria-landing`, so they only match inside the landing tree
+ *     and always out-rank the app's global element rules;
+ *   - Tailwind's preflight is NOT imported globally; the few resets the page needs are scoped below;
+ *   - landing fonts/radii are set on `.aria-landing`, never on :root.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap");
+@import "tailwindcss/theme.css" layer(theme);
+
+@theme {
+  --color-cream: #f5f2ec;
+  --color-cream2: #ece8de;
+  --color-ink: #191916;
+  --color-muted: #716f68;
+  --color-green: #0b6b50;
+  --color-sage: #bdd0c2;
+  --color-sagelight: #dce7de;
+  --color-gold: #c3a56a;
+  --color-peach: #e8bca1;
+  --color-risk: #b96761;
+  --color-blue: #a9c0ca;
+  --color-line: rgba(25, 25, 22, 0.12);
+}
+
+/* ------------------------------ Page takeover ------------------------------ */
+
+body.aria-landing-active {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+  transition: none;
+}
+
+.aria-landing {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+
+  min-height: 100vh;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ------------------------- Scoped preflight (subset) ------------------------ */
+
+.aria-landing :where(h1, h2, h3, h4, h5, h6) {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+
+.aria-landing :where(a) {
+  color: inherit;
+  text-decoration: inherit;
+}
+
+.aria-landing :where(button) {
+  background: transparent;
+  border: 0 solid;
+  border-radius: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+}
+
+.aria-landing :where(img, svg, video, canvas) {
+  display: block;
+  vertical-align: middle;
+}
+
+.aria-landing :where(ul, ol) {
+  list-style: none;
+}
+
+.aria-landing ::selection {
+  background: rgba(11, 107, 80, 0.18);
+}
+
+.aria-landing :focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 3px;
+}
+
+/* ------------------------------ Design helpers ----------------------------- */
+
+/* Paper grain via layered gradients (no images) */
+.aria-landing .texture-grain {
+  background-image: radial-gradient(rgba(25, 25, 22, 0.028) 1px, transparent 1px),
+    radial-gradient(rgba(25, 25, 22, 0.018) 1px, transparent 1px);
+  background-size: 22px 22px, 34px 34px;
+  background-position: 0 0, 11px 17px;
+}
+
+.aria-landing .tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Animated underline for nav links */
+.aria-landing .nav-link {
+  position: relative;
+}
+.aria-landing .nav-link::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 7px;
+  height: 1.5px;
+  background: var(--color-green);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  border-radius: 2px;
+}
+.aria-landing .nav-link:hover::after {
+  transform: scaleX(1);
+}
+
+/* Card hover lift — used across all surfaces */
+.aria-landing .card-lift {
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.3s ease;
+  will-change: transform;
+}
+.aria-landing .card-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 48px -20px rgba(25, 25, 22, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aria-landing .card-lift:hover {
+    transform: none;
+  }
+  .aria-landing *,
+  .aria-landing *::before,
+  .aria-landing *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* -------------------------------- Utilities -------------------------------- */
+
+/* Only the landing sources are scanned, and only as descendants of .aria-landing. */
+@source "./LandingPage.tsx";
+@source "./components";
+
+.aria-landing {
+  @tailwind utilities source(none);
+}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import DashboardLayout from './components/DashboardLayout';
@@ -17,11 +17,15 @@ import BalanceSheet from './pages/dashboard/BalanceSheet';
 import News from './pages/dashboard/News';
 import Investments from './pages/dashboard/Investments';
 import SecurityDetail from './pages/dashboard/SecurityDetail';
-import Landing from './pages/Landing';
 import MonthlyTracker from './pages/dashboard/MonthlyTracker';
 import { ThemeProvider } from './context/ThemeContext';
 import { AuthProvider, ProtectedRoute } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
+
+// The landing page pulls in its own animation stack (motion, gsap, lenis) that no other route
+// needs, so it loads as a separate chunk instead of weighing down login and the dashboard.
+const Landing = lazy(() => import('./pages/Landing'));
+const landingFallback = <div style={{ minHeight: '100vh', background: 'var(--bg-color)' }} />;
 
 function App() {
   return (
@@ -31,7 +35,7 @@ function App() {
           <Router>
             <Routes>
               {/* Auth & Onboarding Routes */}
-              <Route path="/" element={<Landing />} />
+              <Route path="/" element={<Suspense fallback={landingFallback}><Landing /></Suspense>} />
 
               <Route element={<Layout />}>
                 <Route path="register" element={<Register />} />
