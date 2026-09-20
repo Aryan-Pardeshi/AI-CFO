@@ -19,12 +19,14 @@ const Layout = () => {
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
-        padding: '1.5rem 2rem',
+        padding: '0.5rem 2rem',
         borderBottom: '1px solid var(--border-color)'
       }}>
-        <div style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', fontWeight: 600 }}>
-          AICFO
-        </div>
+        <img
+          src="/aria-logo.png"
+          alt="ARIA"
+          style={{ width: '56px', height: '56px', objectFit: 'contain', flexShrink: 0 }}
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <ThemeToggle />
           {(isAuthenticated || userEmail) && (
