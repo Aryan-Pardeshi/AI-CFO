@@ -2,14 +2,20 @@ import React, { useEffect, useState } from 'react';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
 import StatementAutofillBox from '../../components/onboarding/StatementAutofillBox';
+import StatementReviewPanel from '../../components/onboarding/StatementReviewPanel';
 import { errStyle } from '../../components/onboarding/styles.js';
 import { MAX_PAISE, parseRupeesField, paiseToRupees, STEP3_DRAFT_KEY, deserializeStep3Draft, serializeStep3Draft } from '../../lib/onboarding.js';
+import { uploadAndProcessCsv, commitStatement } from '../../lib/statementsApi.js';
+import { deriveLatestMonthAutofill } from '../../lib/statementsAutofill.js';
 
 const MonthlyMoney = ({ profile, saveAndAdvance, goBack }) => {
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState('');
   const [statementMsg, setStatementMsg] = useState('');
+  const [statementReview, setStatementReview] = useState(null);
+  const [importingStatement, setImportingStatement] = useState(false);
+  const [committingStatement, setCommittingStatement] = useState(false);
   const [step3Draft] = useState(() => {
     try {
       return deserializeStep3Draft(window.localStorage.getItem(STEP3_DRAFT_KEY));
@@ -48,8 +54,65 @@ const MonthlyMoney = ({ profile, saveAndAdvance, goBack }) => {
     setCashParts((prev) => ({ ...prev, [id]: value }));
   }
 
-  function handleStatementAutofill() {
-    setStatementMsg("Statement import isn't available yet — enter the numbers manually");
+  async function handleStatementFile(file) {
+    if (importingStatement || committingStatement) return;
+    setImportingStatement(true);
+    setFormError('');
+    setStatementMsg('');
+    try {
+      const review = await uploadAndProcessCsv(file);
+      setStatementReview(review);
+      setStatementMsg('Your CSV is ready to review. Nothing has been saved yet.');
+    } catch (err) {
+      setFormError(err?.message || 'Could not import that CSV statement. Try another file.');
+    } finally {
+      setImportingStatement(false);
+    }
+  }
+
+  function updateStatementRow(txnId, field, value) {
+    setStatementReview((current) => ({
+      ...current,
+      review_rows: current.review_rows.map((row) => (
+        row.txn_id === txnId
+          ? { ...row, [field]: value, ...(field === 'category' ? { category_source: 'user' } : {}) }
+          : row
+      )),
+    }));
+  }
+
+  function applyStatementAutofill(autofill) {
+    setIncomes((current) => ({ ...current, job: paiseToRupees(autofill.income_paise) }));
+    setExpenses((current) => Object.fromEntries(Object.keys(current).map((field) => (
+      Object.hasOwn(autofill.expenses_paise, field)
+        ? [field, paiseToRupees(autofill.expenses_paise[field])]
+        : [field, current[field]]
+    ))));
+    setMonthlyInvestment(paiseToRupees(autofill.monthly_investment_paise));
+    if (autofill.current_balance_paise !== null) {
+      setCashParts((current) => ({ ...current, current: paiseToRupees(autofill.current_balance_paise) }));
+    }
+  }
+
+  async function confirmStatementReview() {
+    if (!statementReview || importingStatement || committingStatement) return;
+    const autofill = deriveLatestMonthAutofill(statementReview.review_rows);
+    if (!autofill) {
+      setFormError('The reviewed statement has no usable transaction dates.');
+      return;
+    }
+    setCommittingStatement(true);
+    setFormError('');
+    try {
+      await commitStatement(statementReview.job_id, statementReview.review_rows);
+      applyStatementAutofill(autofill);
+      setStatementReview(null);
+      setStatementMsg(`Saved your reviewed transactions and filled values from ${autofill.month}. You can still edit every field.`);
+    } catch (err) {
+      setFormError(err?.message || 'Could not save the reviewed statement. Your form has not changed.');
+    } finally {
+      setCommittingStatement(false);
+    }
   }
 
   async function continueFromStep3() {
@@ -111,14 +174,16 @@ const MonthlyMoney = ({ profile, saveAndAdvance, goBack }) => {
 
   return (
     <>
-      {formError && <div style={{ color: 'var(--error-color)', marginBottom: '1rem', fontSize: '0.875rem' }}>{formError}</div>}
+      {formError && <div role="alert" style={{ color: 'var(--error-color)', marginBottom: '1rem', fontSize: '0.875rem' }}>{formError}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       <StatementAutofillBox
         heading="Auto-fill from a bank statement (optional)"
-        helperText="Try importing a statement to fill these numbers."
-        onClick={handleStatementAutofill}
+        helperText="Upload a CSV bank statement to review its transactions and fill this form."
+        onFileSelected={handleStatementFile}
+        loading={importingStatement || committingStatement}
         message={statementMsg}
       />
+      {statementReview && <StatementReviewPanel review={statementReview} onRowChange={updateStatementRow} onConfirm={confirmStatementReview} confirming={committingStatement || importingStatement} />}
 
       <div>
         <h3 style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>Income Streams (Monthly, ₹, optional)</h3>
